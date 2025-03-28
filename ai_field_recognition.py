@@ -46,9 +46,19 @@ except ImportError:
     logger.warning("Scikit-learn not available. Using basic clustering.")
     SKLEARN_AVAILABLE = False
 
-# We're disabling TensorFlow to avoid import issues
-TF_AVAILABLE = False
-logger.warning("TensorFlow functionality disabled to ensure system stability. Using traditional OCR methods instead.")
+# Try to import TensorFlow with appropriate fallbacks
+try:
+    import tensorflow as tf
+    from tensorflow.keras.models import Sequential
+    from tensorflow.keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPooling2D
+    TF_AVAILABLE = True
+    logger.info("TensorFlow is available for enhanced field recognition")
+except ImportError:
+    TF_AVAILABLE = False
+    logger.warning("TensorFlow functionality unavailable. Using traditional OCR methods instead.")
+except Exception as e:
+    TF_AVAILABLE = False
+    logger.warning(f"TensorFlow loading error: {e}. Using traditional OCR methods instead.")
 
 # Matplotlib is optional - used only for debugging visualizations
 try:

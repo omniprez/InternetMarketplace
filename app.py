@@ -6,6 +6,7 @@ import json
 import sys
 import tempfile
 import shutil
+import base64
 
 # Setup logging first
 logging.basicConfig(level=logging.DEBUG)
@@ -48,6 +49,23 @@ except ImportError as e:
     logger.error(f"Failed to import excel_generator: {e}")
     sys.exit(1)
 
+# Import Anthropic if available for potential Claude-based enhancements
+anthropic_client = None
+try:
+    import anthropic
+    import os
+    # the newest Anthropic model is "claude-3-5-sonnet-20241022" which was released October 22, 2024
+    ANTHROPIC_KEY = os.environ.get('ANTHROPIC_API_KEY')
+    if ANTHROPIC_KEY:
+        anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+        logger.info("Successfully initialized Anthropic client")
+    else:
+        logger.warning("Anthropic API key not found in environment variables. Claude-based enhancements will be disabled.")
+except ImportError as e:
+    logger.warning(f"Anthropic library not available: {e}")
+except Exception as e:
+    logger.error(f"Error initializing Anthropic client: {e}")
+
 # Try to import the AI field recognizer with graceful fallback
 field_recognizer = None
 try:
@@ -58,22 +76,205 @@ except Exception as e:
     logger.error(f"Failed to initialize AI field recognizer: {e}")
     logger.warning("Continuing without AI field recognition capabilities")
     
-    # Create minimal fallback for the field_recognizer
+    # Create enhanced fallback for the field_recognizer with Anthropic capabilities if available
     class FallbackFieldRecognizer:
+        def __init__(self):
+            self.anthropic_client = anthropic_client
+            self.use_claude = self.anthropic_client is not None
+            if self.use_claude:
+                logger.info("FallbackFieldRecognizer will use Claude for enhanced extraction")
+            else:
+                logger.info("FallbackFieldRecognizer will use traditional OCR only")
+                
         def process_invoice(self, image_path):
-            logger.warning(f"Using fallback processor for {image_path}")
-            # Delegate to the standard invoice processor
+            """Process the invoice with the basic OCR and optional Claude enhancement"""
+            logger.info(f"Using fallback processor for {image_path}")
+            
+            # Delegate to the standard invoice processor first
             from invoice_parser import process_image
             result = process_image(image_path)
-            # Convert to AI field recognizer format
-            return {
+            
+            # Create basic extraction result
+            extraction_result = {
                 'fields': {k: v for k, v in result.get('header', {}).items()},
                 'line_items': result.get('line_items', []),
                 'visualization_data': None
             }
             
+            # Use Claude to enhance extraction if available
+            if self.use_claude and os.path.exists(image_path):
+                try:
+                    logger.info("Attempting Claude-based enhancement")
+                    # Read the image as base64 for Claude
+                    with open(image_path, "rb") as img_file:
+                        base64_image = base64.b64encode(img_file.read()).decode("utf-8")
+                    
+                    # the newest Anthropic model is "claude-3-5-sonnet-20241022" which was released October 22, 2024  
+                    response = self.anthropic_client.messages.create(
+                        model="claude-3-5-sonnet-20241022",
+                        max_tokens=1500,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": """Please extract all relevant invoice information from this image. 
+                                        Return the data in this exact JSON format:
+                                        {
+                                            "invoice_number": "...",
+                                            "date": "...",
+                                            "vendor": "...",
+                                            "total": "...",
+                                            "line_items": [
+                                                {"description": "...", "quantity": "...", "unit_price": "...", "total": "..."},
+                                                ...
+                                            ]
+                                        }
+                                        
+                                        Only output valid JSON - no explanations or other text. If you can't determine a field, use null or an empty string."""
+                                    },
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": "image/jpeg",
+                                            "data": base64_image
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    )
+                    
+                    # Extract the JSON response text
+                    json_text = response.content[0].text
+                    
+                    # Try to parse the JSON
+                    try:
+                        claude_data = json.loads(json_text)
+                        
+                        # Claude produced nice JSON - merge with our OCR results
+                        # For fields, prefer Claude's extraction if it has values
+                        if claude_data.get('invoice_number'):
+                            extraction_result['fields']['invoice_number'] = claude_data['invoice_number']
+                        if claude_data.get('date'):
+                            extraction_result['fields']['date'] = claude_data['date']
+                        if claude_data.get('vendor'):
+                            extraction_result['fields']['vendor'] = claude_data['vendor']
+                        if claude_data.get('total'):
+                            extraction_result['fields']['total'] = claude_data['total']
+                        
+                        # For line items, use Claude's if it found more than what we already have
+                        claude_line_items = claude_data.get('line_items', [])
+                        if len(claude_line_items) > len(extraction_result['line_items']):
+                            # Format Claude's line items to match our expected format
+                            formatted_items = []
+                            for item in claude_line_items:
+                                formatted_item = {
+                                    'description': item.get('description', ''),
+                                    'quantity': item.get('quantity', ''),
+                                    'unit_price': item.get('unit_price', ''),
+                                    'total': item.get('total', '')
+                                }
+                                formatted_items.append(formatted_item)
+                            extraction_result['line_items'] = formatted_items
+                            
+                        logger.info("Successfully enhanced extraction with Claude")
+                        # Store the raw Claude response for visualization
+                        extraction_result['claude_response'] = json_text
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Could not parse Claude response as JSON: {e}")
+                except Exception as e:
+                    logger.error(f"Error using Claude for enhancement: {e}")
+            
+            return extraction_result
+            
         def generate_visualization(self, extraction_result):
-            return "<p>AI visualization not available - using fallback processor</p>"
+            """Generate visualization HTML for the extraction results"""
+            # If we have Claude data, show a fancier visualization
+            if self.use_claude and extraction_result.get('claude_response'):
+                html = f"""
+                <div class="ai-enhanced-preview">
+                    <h4>AI-Enhanced Extraction Preview</h4>
+                    <div class="alert alert-info">
+                        <strong>Success:</strong> Claude AI has enhanced this extraction with advanced vision capabilities.
+                    </div>
+                    
+                    <div class="card mb-3">
+                        <div class="card-header bg-primary text-white">
+                            <strong>Extracted Fields</strong>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                """
+                
+                # Add each field
+                for field, value in extraction_result.get('fields', {}).items():
+                    html += f"""
+                                <div class="col-md-6 mb-2">
+                                    <div class="input-group">
+                                        <span class="input-group-text">{field.replace('_', ' ').title()}</span>
+                                        <input type="text" class="form-control" value="{value}" readonly>
+                                    </div>
+                                </div>
+                    """
+                
+                html += """
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header bg-primary text-white">
+                            <strong>Line Items</strong>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-bordered table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Description</th>
+                                            <th>Quantity</th>
+                                            <th>Unit Price</th>
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                """
+                
+                # Add each line item
+                for item in extraction_result.get('line_items', []):
+                    html += f"""
+                                        <tr>
+                                            <td>{item.get('description', '')}</td>
+                                            <td>{item.get('quantity', '')}</td>
+                                            <td>{item.get('unit_price', '')}</td>
+                                            <td>{item.get('total', '')}</td>
+                                        </tr>
+                    """
+                
+                html += """
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                """
+                return html
+            else:
+                # Basic visualization
+                return """
+                <div class="basic-preview">
+                    <h4>Basic Extraction Preview</h4>
+                    <div class="alert alert-warning">
+                        <strong>Note:</strong> Using traditional OCR. For enhanced accuracy, enable Anthropic Claude AI in settings.
+                    </div>
+                    <p>The basic extraction process has identified invoice fields and line items using OCR technology.</p>
+                    <p>Review the extracted data below and make any necessary corrections before proceeding.</p>
+                </div>
+                """
     
     # Set the fallback recognizer
     field_recognizer = FallbackFieldRecognizer()
@@ -107,6 +308,7 @@ def batch():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    """Upload and process a single invoice file"""
     # Check if the post request has the file part
     if 'invoice' not in request.files:
         flash('No file part', 'danger')
@@ -120,37 +322,47 @@ def upload_file():
         return redirect(request.url)
     
     if file and allowed_file(file.filename):
-        # Create a unique filename
-        filename = str(uuid.uuid4()) + '_' + secure_filename(file.filename)
-        
-        # Save to uploads folder for web access
-        upload_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'uploads')
-        if not os.path.exists(upload_dir):
-            os.makedirs(upload_dir)
-            
-        filepath = os.path.join(upload_dir, filename)
-        file.save(filepath)
-        
-        # Save a copy for processing
-        process_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        shutil.copy2(filepath, process_filepath)
-        
         try:
+            # Create a unique filename
+            filename = str(uuid.uuid4()) + '_' + secure_filename(file.filename)
+            
+            # Save to uploads folder for web access
+            upload_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'uploads')
+            if not os.path.exists(upload_dir):
+                os.makedirs(upload_dir)
+                
+            filepath = os.path.join(upload_dir, filename)
+            file.save(filepath)
+            
+            # Save a copy for processing
+            process_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            shutil.copy2(filepath, process_filepath)
+            
             # Configure extraction settings based on user options
             ai_enhanced = request.form.get('ai_enhanced', 'true') == 'true'
             enhancement_level = request.form.get('enhancement_level', 'medium')
             recognition_mode = request.form.get('recognition_mode', 'auto')
             
-            # Store settings in session
+            # Store settings in session (with serializable values only)
             session['extraction_settings'] = {
                 'ai_enhanced': ai_enhanced,
-                'enhancement_level': enhancement_level,
+                'enhancement_level': enhancement_level, 
                 'recognition_mode': recognition_mode
             }
             
             # Measure processing time
             start_time = time.time()
             
+            # Initialize with default values
+            invoice_data = {
+                'header': {},
+                'line_items': [],
+                'totals': {},
+                'invoice_type': 'unknown'
+            }
+            extraction_preview = "<p>Processing error occurred</p>"
+            
+            # Process with AI enhancement if available and enabled
             if ai_enhanced and field_recognizer is not None:
                 try:
                     # Use AI-enhanced field recognition
@@ -160,36 +372,158 @@ def upload_file():
                     # Convert AI result format to the expected invoice_data format
                     invoice_data = {
                         'header': {},
-                        'line_items': extraction_result.get('line_items', []),
+                        'line_items': [],
                         'totals': {},
                         'invoice_type': 'unknown'
                     }
                     
-                    # Map AI-extracted fields to invoice header format
+                    # Handle line_items safely - ensure they're serializable
+                    line_items_raw = extraction_result.get('line_items', [])
+                    serializable_line_items = []
+                    
+                    # Process line items into a guaranteed serializable format
+                    for item in line_items_raw:
+                        if isinstance(item, dict):
+                            # Dictionary items can be used directly if all values are strings
+                            try:
+                                # Ensure all values are strings
+                                clean_item = {}
+                                for k, v in item.items():
+                                    clean_item[k] = str(v) if v is not None else ""
+                                serializable_line_items.append(clean_item)
+                            except Exception as e:
+                                logger.error(f"Error processing line item dict: {e}")
+                                serializable_line_items.append({"description": "Error processing item"})
+                        elif isinstance(item, str):
+                            # Process string items into structured format
+                            parts = item.split('-')
+                            if len(parts) >= 2:
+                                serializable_line_items.append({
+                                    "product_code": parts[0].strip(),
+                                    "description": parts[1].strip(),
+                                    "quantity": "1",
+                                    "unit_price": "0",
+                                    "total": "0"
+                                })
+                            else:
+                                serializable_line_items.append({
+                                    "description": item.strip(),
+                                    "product_code": "",
+                                    "quantity": "1",
+                                    "unit_price": "0",
+                                    "total": "0"
+                                })
+                        else:
+                            # Handle other types
+                            try:
+                                serializable_line_items.append({
+                                    "description": str(item),
+                                    "product_code": "",
+                                    "quantity": "1",
+                                    "unit_price": "0",
+                                    "total": "0"
+                                })
+                            except Exception as e:
+                                logger.error(f"Failed to convert line item to string: {e}")
+                    
+                    # Use the serializable line items
+                    invoice_data['line_items'] = serializable_line_items
+                    
+                    # Map AI-extracted fields to invoice header format - with type safety
                     fields = extraction_result.get('fields', {})
                     for field, value in fields.items():
-                        if field == 'invoice_number':
-                            invoice_data['header']['invoice_number'] = value
-                        elif field == 'date':
-                            invoice_data['header']['date'] = value
-                        elif field == 'total':
-                            invoice_data['totals']['grand_total'] = value
+                        try:
+                            field_str = str(field)
+                            value_str = str(value) if value is not None else ""
+                            
+                            if field_str == 'invoice_number':
+                                invoice_data['header']['invoice_number'] = value_str
+                            elif field_str == 'date':
+                                invoice_data['header']['date'] = value_str
+                            elif field_str == 'total':
+                                invoice_data['totals']['grand_total'] = value_str
+                            else:
+                                # Add other fields to header for future use
+                                invoice_data['header'][field_str] = value_str
+                        except Exception as field_err:
+                            logger.error(f"Error processing field {field}: {field_err}")
                     
-                    # Add the visualization HTML
-                    extraction_preview = field_recognizer.generate_visualization(extraction_result)
+                    # Add the visualization HTML - with error handling
+                    try:
+                        extraction_preview = field_recognizer.generate_visualization(extraction_result)
+                    except Exception as vis_err:
+                        logger.error(f"Error generating visualization: {vis_err}")
+                        extraction_preview = "<p>AI-enhanced visualization failed, but data extraction completed</p>"
                 except Exception as e:
                     logger.error(f"Error in AI enhancement, falling back to traditional OCR: {e}")
                     # Fall back to traditional OCR
-                    invoice_data = process_image(process_filepath)
-                    extraction_preview = "<p>AI-enhanced visualization failed: falling back to traditional OCR</p>"
+                    try:
+                        invoice_data = process_image(process_filepath)
+                        # Ensure all values are strings for JSON serialization
+                        for section in ['header', 'totals']:
+                            for k, v in invoice_data.get(section, {}).items():
+                                invoice_data[section][k] = str(v) if v is not None else ""
+                                
+                        # Ensure line items are properly serializable
+                        safe_line_items = []
+                        for item in invoice_data.get('line_items', []):
+                            if isinstance(item, dict):
+                                safe_item = {}
+                                for k, v in item.items():
+                                    safe_item[k] = str(v) if v is not None else ""
+                                safe_line_items.append(safe_item)
+                            else:
+                                safe_line_items.append({"description": str(item)})
+                        invoice_data['line_items'] = safe_line_items
+                        
+                        extraction_preview = "<p>AI-enhanced visualization failed: using traditional OCR results</p>"
+                    except Exception as ocr_err:
+                        logger.error(f"Traditional OCR also failed: {ocr_err}")
+                        # Create minimum viable data
+                        invoice_data = {
+                            'header': {'invoice_number': os.path.basename(process_filepath)},
+                            'line_items': [{'description': 'OCR processing failed', 'quantity': '0', 'total': '0'}],
+                            'totals': {'grand_total': '0'},
+                            'invoice_type': 'unknown'
+                        }
+                        extraction_preview = "<p>Invoice processing failed. Please try another image.</p>"
             else:
-                # Use traditional OCR processing
+                # Use traditional OCR processing with enhanced error handling
                 ai_reason = "disabled by user" if not ai_enhanced else "not available"
                 logger.info(f"Processing file with traditional OCR ({ai_reason}): {process_filepath}")
-                invoice_data = process_image(process_filepath)
-                extraction_preview = f"<p>AI-enhanced visualization {ai_reason}</p>"
+                try:
+                    invoice_data = process_image(process_filepath)
+                    
+                    # Ensure all values are strings for JSON serialization
+                    for section in ['header', 'totals']:
+                        for k, v in invoice_data.get(section, {}).items():
+                            invoice_data[section][k] = str(v) if v is not None else ""
+                            
+                    # Ensure line items are properly serializable
+                    safe_line_items = []
+                    for item in invoice_data.get('line_items', []):
+                        if isinstance(item, dict):
+                            safe_item = {}
+                            for k, v in item.items():
+                                safe_item[k] = str(v) if v is not None else ""
+                            safe_line_items.append(safe_item)
+                        else:
+                            safe_line_items.append({"description": str(item)})
+                    invoice_data['line_items'] = safe_line_items
+                    
+                    extraction_preview = f"<p>AI-enhanced visualization {ai_reason}</p>"
+                except Exception as ocr_err:
+                    logger.error(f"Traditional OCR failed: {ocr_err}")
+                    # Create minimum viable data
+                    invoice_data = {
+                        'header': {'invoice_number': os.path.basename(process_filepath)},
+                        'line_items': [{'description': 'OCR processing failed', 'quantity': '0', 'total': '0'}],
+                        'totals': {'grand_total': '0'},
+                        'invoice_type': 'unknown'
+                    }
+                    extraction_preview = "<p>Invoice processing failed. Please try another image.</p>"
             
-            # Calculate processing time and confidence
+            # Calculate processing time
             processing_time = round(time.time() - start_time, 2)
             
             # Calculate confidence based on the amount of data extracted
@@ -212,15 +546,20 @@ def upload_file():
                 'processing_time': processing_time
             }
             
-            # Store data in session for further processing
+            # Store data in session for further processing - using json to ensure it's serializable
             session['invoice_data'] = invoice_data
             session['file_path'] = process_filepath
             session['filename'] = filename
             session['extraction_preview'] = extraction_preview
             session['stats'] = stats
             
+            # Save session immediately to catch any serialization issues
+            session.modified = True
+            
+            logger.info("Successfully processed invoice. Redirecting to preview page.")
             # Redirect to preview or review page based on setting
             return redirect(url_for('preview_extraction'))
+            
         except Exception as e:
             logger.error(f"Error processing invoice: {str(e)}")
             flash(f'Error processing invoice: {str(e)}', 'danger')
@@ -448,33 +787,70 @@ def preview_extraction():
     """
     Preview the extraction results with interactive visualization
     """
-    # Get data from session
-    invoice_data = session.get('invoice_data')
-    extraction_preview = session.get('extraction_preview')
-    filename = session.get('filename')
-    stats = session.get('stats')
-    
-    if not invoice_data or not extraction_preview:
-        flash('No extraction data to preview. Please upload an invoice first.', 'warning')
+    try:
+        # Get data from session with safe defaults
+        invoice_data = session.get('invoice_data', {})
+        extraction_preview = session.get('extraction_preview', '<p>No preview available</p>')
+        filename = session.get('filename', '')
+        stats = session.get('stats', {
+            'fields_detected': 0,
+            'line_items': 0,
+            'confidence': 0,
+            'processing_time': 0
+        })
+        
+        if not invoice_data:
+            flash('No extraction data to preview. Please upload an invoice first.', 'warning')
+            return redirect(url_for('index'))
+        
+        # Prepare data for template with safe defaults and type checks
+        if not isinstance(invoice_data, dict):
+            logger.error(f"Invalid invoice_data type: {type(invoice_data)}")
+            invoice_data = {
+                'header': {'error': 'Invalid data format'},
+                'line_items': [{'description': 'Data processing error'}],
+                'totals': {'grand_total': '0'}
+            }
+            
+        header_data = invoice_data.get('header', {})
+        if not isinstance(header_data, dict):
+            header_data = {'error': 'Invalid header format'}
+            
+        line_items = invoice_data.get('line_items', [])
+        if not isinstance(line_items, list):
+            line_items = [{'description': 'Invalid line items format'}]
+            
+        totals = invoice_data.get('totals', {})
+        if not isinstance(totals, dict):
+            totals = {'grand_total': '0'}
+        
+        # Get original image path for display with safety checks
+        uploaded_image_path = None
+        if filename and isinstance(filename, str):
+            # Sanitize filename for URL
+            safe_filename = filename.replace('..', '').replace('/', '_')
+            uploaded_image_path = url_for('static', filename=f'uploads/{safe_filename}')
+        
+        # Ensure extraction_preview is a string
+        if not isinstance(extraction_preview, str):
+            try:
+                extraction_preview = str(extraction_preview)
+            except:
+                extraction_preview = "<p>Preview generation error</p>"
+        
+        logger.info("Rendering preview template with extracted data")
+        return render_template('preview.html',
+                            header=header_data,
+                            line_items=line_items,
+                            totals=totals,
+                            extraction_preview=extraction_preview,
+                            uploaded_image=uploaded_image_path,
+                            stats=stats)
+                            
+    except Exception as e:
+        logger.error(f"Error in preview_extraction: {e}")
+        flash(f"An error occurred while preparing the preview: {str(e)}", "danger")
         return redirect(url_for('index'))
-    
-    # Prepare data for template
-    header_data = invoice_data.get('header', {})
-    line_items = invoice_data.get('line_items', [])
-    totals = invoice_data.get('totals', {})
-    
-    # Get original image path for display
-    uploaded_image_path = None
-    if filename:
-        uploaded_image_path = url_for('static', filename=f'uploads/{filename}')
-    
-    return render_template('preview.html',
-                         header=header_data,
-                         line_items=line_items,
-                         totals=totals,
-                         extraction_preview=extraction_preview,
-                         uploaded_image=uploaded_image_path,
-                         stats=stats)
 
 @app.route('/accept_extraction', methods=['POST'])
 def accept_extraction():

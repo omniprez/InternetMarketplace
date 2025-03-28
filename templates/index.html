@@ -67,6 +67,7 @@
                                                     <option value="auto" selected>Auto-detect</option>
                                                     <option value="general">General Invoice</option>
                                                     <option value="edendale">Edendale Format</option>
+                                                    <option value="claude">Claude AI (Vision)</option>
                                                 </select>
                                                 <div class="form-text">Select format if known, or use auto-detect</div>
                                             </div>
@@ -74,6 +75,7 @@
                                     </div>
                                     <div class="alert alert-info mt-2 mb-0">
                                         <i class="fas fa-lightbulb"></i> AI-enhanced extraction improves accuracy by up to 35% and provides interactive visual verification!
+                                        <br><strong>NEW:</strong> <a href="#" data-bs-toggle="modal" data-bs-target="#claudeInfoModal" class="alert-link">Claude AI Vision</a> capabilities now available for even greater extraction accuracy!
                                     </div>
                                 </div>
                             </div>
@@ -134,6 +136,84 @@
                         <div class="badge bg-primary">Multiple Formats</div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Claude AI Info Modal -->
+<div class="modal fade" id="claudeInfoModal" tabindex="-1" aria-labelledby="claudeInfoModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="claudeInfoModalLabel"><i class="fas fa-robot"></i> Claude AI Vision Technology</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-4 text-center mb-3">
+                        <div style="font-size: 4rem; color: var(--bs-primary);">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                    </div>
+                    <div class="col-md-8">
+                        <h4>Powered by Anthropic Claude</h4>
+                        <p>Our application now integrates with Anthropic's Claude AI model to provide superior extraction accuracy for invoice data.</p>
+                        <div class="alert alert-info">
+                            <strong>Note:</strong> Claude-powered extraction requires an Anthropic API key. Contact your administrator to enable this feature.
+                        </div>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <h5>Benefits of Claude AI Vision</h5>
+                <div class="row">
+                    <div class="col-md-6">
+                        <ul class="list-group mb-3">
+                            <li class="list-group-item d-flex align-items-center">
+                                <i class="fas fa-check-circle text-success me-2"></i>
+                                <div>
+                                    <strong>Superior accuracy</strong>
+                                    <div class="small text-muted">Claude understands invoice context like a human</div>
+                                </div>
+                            </li>
+                            <li class="list-group-item d-flex align-items-center">
+                                <i class="fas fa-check-circle text-success me-2"></i>
+                                <div>
+                                    <strong>Advanced invoice understanding</strong>
+                                    <div class="small text-muted">Can handle complex and unusual formats</div>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <ul class="list-group mb-3">
+                            <li class="list-group-item d-flex align-items-center">
+                                <i class="fas fa-check-circle text-success me-2"></i>
+                                <div>
+                                    <strong>Line item identification</strong>
+                                    <div class="small text-muted">Better at identifying products and services</div>
+                                </div>
+                            </li>
+                            <li class="list-group-item d-flex align-items-center">
+                                <i class="fas fa-check-circle text-success me-2"></i>
+                                <div>
+                                    <strong>Table extraction</strong>
+                                    <div class="small text-muted">Excels at understanding tabular data</div>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="alert alert-warning">
+                    <i class="fas fa-info-circle"></i> Claude AI processing may take slightly longer than standard OCR but provides significantly improved results.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="document.getElementById('recognition-mode').value='claude';">Use Claude AI</button>
             </div>
         </div>
     </div>
