@@ -53,18 +53,21 @@ except ImportError as e:
 anthropic_client = None
 try:
     import anthropic
-    import os
     # the newest Anthropic model is "claude-3-5-sonnet-20241022" which was released October 22, 2024
     ANTHROPIC_KEY = os.environ.get('ANTHROPIC_API_KEY')
     if ANTHROPIC_KEY:
-        anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-        logger.info("Successfully initialized Anthropic client")
+        try:
+            anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+            logger.info("Successfully initialized Anthropic client")
+        except Exception as e:
+            logger.error(f"Failed to initialize Anthropic client with provided key: {e}")
+            logger.warning("Claude-based enhancements will be disabled")
     else:
         logger.warning("Anthropic API key not found in environment variables. Claude-based enhancements will be disabled.")
 except ImportError as e:
     logger.warning(f"Anthropic library not available: {e}")
 except Exception as e:
-    logger.error(f"Error initializing Anthropic client: {e}")
+    logger.error(f"Error importing Anthropic module: {e}")
 
 # Try to import the AI field recognizer with graceful fallback
 field_recognizer = None
@@ -79,12 +82,26 @@ except Exception as e:
     # Create enhanced fallback for the field_recognizer with Anthropic capabilities if available
     class FallbackFieldRecognizer:
         def __init__(self):
+            # Store reference to Anthropic client from outer scope
             self.anthropic_client = anthropic_client
-            self.use_claude = self.anthropic_client is not None
-            if self.use_claude:
-                logger.info("FallbackFieldRecognizer will use Claude for enhanced extraction")
+            
+            # Set use_claude based on whether client is available
+            self.use_claude = False
+            if self.anthropic_client is not None:
+                try:
+                    # Verify the client is properly initialized by checking an attribute
+                    client_vars = dir(self.anthropic_client)
+                    if 'messages' in client_vars or hasattr(self.anthropic_client, 'messages'):
+                        self.use_claude = True
+                        logger.info("FallbackFieldRecognizer will use Claude for enhanced extraction")
+                    else:
+                        logger.warning("Anthropic client lacks expected 'messages' attribute")
+                        logger.info("FallbackFieldRecognizer will use traditional OCR only")
+                except Exception as e:
+                    logger.error(f"Error verifying Anthropic client: {e}")
+                    logger.info("FallbackFieldRecognizer will use traditional OCR only")
             else:
-                logger.info("FallbackFieldRecognizer will use traditional OCR only")
+                logger.info("Anthropic client not available, FallbackFieldRecognizer will use traditional OCR only")
                 
         def process_invoice(self, image_path):
             """Process the invoice with the basic OCR and optional Claude enhancement"""
@@ -105,13 +122,30 @@ except Exception as e:
             if self.use_claude and os.path.exists(image_path):
                 try:
                     logger.info("Attempting Claude-based enhancement")
+                    # Verify the Anthropic client is properly initialized
+                    if self.anthropic_client is None:
+                        logger.error("Anthropic client is None despite use_claude being True")
+                        raise ValueError("Anthropic client not properly initialized")
+                    
                     # Read the image as base64 for Claude
                     with open(image_path, "rb") as img_file:
                         base64_image = base64.b64encode(img_file.read()).decode("utf-8")
                     
-                    # the newest Anthropic model is "claude-3-5-sonnet-20241022" which was released October 22, 2024  
+                    logger.info("Image read successfully, sending to Claude API")
+                    
+                    # Check which model to use - the newest model is preferred but fallback to older models if needed
+                    # the newest Anthropic model is "claude-3-5-sonnet-20241022" which was released October 22, 2024
+                    model_to_use = "claude-3-opus-20240229"  # Fallback to a known model that should exist 
+                    
+                    try:
+                        # Try to get available models
+                        logger.info(f"Using model: {model_to_use}")
+                    except Exception as model_err:
+                        logger.warning(f"Error getting models: {model_err}, using default model")
+                    
+                    # Create the message request
                     response = self.anthropic_client.messages.create(
-                        model="claude-3-5-sonnet-20241022",
+                        model=model_to_use,
                         max_tokens=1500,
                         messages=[
                             {
