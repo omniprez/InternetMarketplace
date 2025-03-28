@@ -1,7 +1,7 @@
 """
-AI-based Field Recognition Module for Invoice Processing
+OpenCV-based Field Recognition Module for Invoice Processing
 This module enhances OCR accuracy using improved image processing techniques
-to better recognize invoice fields, with optional AI enhancements when available.
+to better recognize invoice fields without requiring TensorFlow.
 """
 
 import os
@@ -46,30 +46,9 @@ except ImportError:
     logger.warning("Scikit-learn not available. Using basic clustering.")
     SKLEARN_AVAILABLE = False
 
-# Try to import TensorFlow with appropriate fallbacks
+# No TensorFlow - using purely OpenCV and scikit-learn for enhanced processing
 TF_AVAILABLE = False
-try:
-    # First check if numpy is fully working
-    import numpy as np
-    test_array = np.array([1, 2, 3])
-    
-    # Only try importing TensorFlow if numpy is working properly
-    import tensorflow as tf
-    from tensorflow.keras.models import Sequential
-    from tensorflow.keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPooling2D
-    
-    # Test TensorFlow functionality with a basic operation
-    test_tf = tf.constant([1, 2, 3])
-    
-    # Only mark as available if all the above succeeded
-    TF_AVAILABLE = True
-    logger.info("TensorFlow is available for enhanced field recognition")
-except ImportError as ie:
-    TF_AVAILABLE = False
-    logger.warning(f"TensorFlow functionality unavailable: {ie}. Using traditional OCR methods instead.")
-except Exception as e:
-    TF_AVAILABLE = False
-    logger.warning(f"TensorFlow loading error: {e}. Using traditional OCR methods instead.")
+logger.info("Using OpenCV and scikit-learn for enhanced invoice processing without TensorFlow")
 
 # Matplotlib is optional - used only for debugging visualizations
 try:
@@ -128,45 +107,12 @@ class AIFieldRecognizer:
         }
 
     def initialize_models(self):
-        """Initialize TensorFlow models for field recognition and character enhancement if available"""
+        """Set up OpenCV and scikit-learn based field recognition"""
         self.field_model = None
         self.character_model = None
         
-        # Only initialize TensorFlow models if available
-        if TF_AVAILABLE:
-            try:
-                # Create a simple model for field classification
-                self.field_model = Sequential([
-                    Conv2D(32, (3, 3), activation='relu', input_shape=(128, 512, 1)),
-                    MaxPooling2D((2, 2)),
-                    Conv2D(64, (3, 3), activation='relu'),
-                    MaxPooling2D((2, 2)),
-                    Conv2D(64, (3, 3), activation='relu'),
-                    Flatten(),
-                    Dense(64, activation='relu'),
-                    Dropout(0.5),
-                    Dense(10, activation='softmax')  # 10 common field types
-                ])
-                
-                # Create a simple model for character enhancement
-                self.character_model = Sequential([
-                    Conv2D(32, (3, 3), activation='relu', input_shape=(32, 32, 1)),
-                    MaxPooling2D((2, 2)),
-                    Conv2D(64, (3, 3), activation='relu'),
-                    MaxPooling2D((2, 2)),
-                    Flatten(),
-                    Dense(128, activation='relu'),
-                    Dense(94, activation='softmax')  # 94 printable ASCII characters
-                ])
-                
-                logger.info("AI models initialized successfully")
-            except Exception as e:
-                logger.error(f"Error initializing AI models: {e}")
-                # Fall back to traditional methods if models can't be initialized
-                self.field_model = None
-                self.character_model = None
-        else:
-            logger.info("Using traditional methods without TensorFlow models")
+        # We're using OpenCV and scikit-learn instead of TensorFlow models
+        logger.info("Using OpenCV and scikit-learn for enhanced field recognition")
 
     def preprocess_image(self, image_path):
         """
