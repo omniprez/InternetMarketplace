@@ -1,0 +1,146 @@
+{% extends "layout.html" %}
+
+{% block title %}Invoice OCR - Batch Processing{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-10 offset-md-1">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0"><i class="fas fa-layer-group"></i> Batch Invoice Processing</h4>
+            </div>
+            <div class="card-body">
+                <form id="batch-upload-form" action="{{ url_for('batch_upload') }}" method="post" enctype="multipart/form-data">
+                    <div class="mb-4">
+                        <h5 class="card-title">Upload Multiple Invoices</h5>
+                        <p class="card-text text-muted">Upload multiple invoice images for batch processing. Supported formats: JPG, PNG, TIFF, PDF.</p>
+                    </div>
+                    
+                    <div id="batch-upload-area" class="upload-area">
+                        <div class="upload-icon">
+                            <i class="fas fa-file-upload"></i>
+                        </div>
+                        <div class="upload-text">
+                            <h5>Drag & drop multiple invoices here</h5>
+                            <p>or click to browse files</p>
+                        </div>
+                        <input type="file" id="batch-invoice-files" name="invoices" accept=".jpg,.jpeg,.png,.tiff,.pdf" class="d-none" multiple>
+                        <p class="mt-2 text-muted">Selected: <span id="file-count">0</span> files</p>
+                    </div>
+                    
+                    <ul id="file-list" class="list-group mt-3 mb-3" style="display: none;"></ul>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary" disabled>
+                            <i class="fas fa-cogs"></i> Process All Invoices
+                        </button>
+                        <a href="{{ url_for('batch') }}" class="btn btn-outline-secondary">
+                            <i class="fas fa-redo"></i> Reset
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        {% if summary is defined and has_results %}
+        <div class="card shadow-sm mt-4 batch-upload-results">
+            <div class="card-header bg-success text-white">
+                <h4 class="mb-0"><i class="fas fa-check-circle"></i> Batch Processing Results</h4>
+            </div>
+            <div class="card-body">
+                <div class="batch-summary mb-4">
+                    <div class="row">
+                        <div class="col-md-4 text-center">
+                            <h2>{{ summary.total_processed }}</h2>
+                            <p>Successfully Processed</p>
+                        </div>
+                        <div class="col-md-4 text-center">
+                            <h2>{{ summary.total_failed }}</h2>
+                            <p>Failed to Process</p>
+                        </div>
+                        <div class="col-md-4 text-center">
+                            <h2>{{ summary.total_processed + summary.total_failed }}</h2>
+                            <p>Total Files</p>
+                        </div>
+                    </div>
+                </div>
+                
+                {% if summary.processed %}
+                <h5>Successfully Processed Files:</h5>
+                <ul class="list-group mb-4">
+                    {% for filename in summary.processed %}
+                    <li class="list-group-item">
+                        <i class="fas fa-check-circle text-success me-2"></i> {{ filename }}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                
+                {% if summary.failed %}
+                <h5>Failed Files:</h5>
+                <ul class="list-group mb-4">
+                    {% for filename, error in summary.failed %}
+                    <li class="list-group-item">
+                        <i class="fas fa-times-circle text-danger me-2"></i> 
+                        <strong>{{ filename }}</strong> - {{ error }}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                
+                {% if summary.processed %}
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('download_batch_excel') }}" class="btn btn-success">
+                        <i class="fas fa-file-excel"></i> Download Combined Excel File
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Features Section -->
+        <div class="row mt-5">
+            <div class="col-12">
+                <h3 class="text-center mb-4">Benefits of Batch Processing</h3>
+            </div>
+            
+            <div class="col-md-4 mb-4">
+                <div class="card feature-card h-100">
+                    <div class="card-body text-center">
+                        <div class="feature-icon">
+                            <i class="fas fa-bolt"></i>
+                        </div>
+                        <h5 class="card-title">Time Efficient</h5>
+                        <p class="card-text">Process multiple invoices at once instead of uploading them individually.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4 mb-4">
+                <div class="card feature-card h-100">
+                    <div class="card-body text-center">
+                        <div class="feature-icon">
+                            <i class="fas fa-table"></i>
+                        </div>
+                        <h5 class="card-title">Combined Data</h5>
+                        <p class="card-text">Get a combined Excel file with separate worksheets for each invoice.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4 mb-4">
+                <div class="card feature-card h-100">
+                    <div class="card-body text-center">
+                        <div class="feature-icon">
+                            <i class="fas fa-chart-bar"></i>
+                        </div>
+                        <h5 class="card-title">Summary View</h5>
+                        <p class="card-text">Get a summary sheet with key metrics from all the processed invoices.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

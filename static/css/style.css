@@ -1,0 +1,144 @@
+/* Custom styles for Invoice OCR Application */
+
+.container {
+    max-width: 1200px;
+}
+
+.upload-area {
+    border: 2px dashed var(--bs-gray-500);
+    border-radius: 8px;
+    padding: 40px;
+    text-align: center;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    margin-bottom: 20px;
+}
+
+.upload-area:hover {
+    border-color: var(--bs-primary);
+}
+
+.upload-area.drag-over {
+    background-color: rgba(var(--bs-primary-rgb), 0.1);
+    border-color: var(--bs-primary);
+}
+
+.upload-icon {
+    font-size: 3rem;
+    margin-bottom: 15px;
+    color: var(--bs-gray-500);
+}
+
+.upload-area:hover .upload-icon {
+    color: var(--bs-primary);
+}
+
+.upload-text {
+    margin-bottom: 15px;
+}
+
+.invoice-preview {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--bs-gray-300);
+    border-radius: 4px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.validation-badge {
+    margin-left: 10px;
+    cursor: pointer;
+}
+
+.navbar-brand {
+    font-weight: bold;
+}
+
+.footer {
+    margin-top: 40px;
+    padding: 20px 0;
+    border-top: 1px solid var(--bs-gray-300);
+}
+
+.line-item-row {
+    margin-bottom: 15px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--bs-gray-200);
+}
+
+.line-item-row:last-child {
+    border-bottom: none;
+}
+
+.batch-upload-results {
+    margin-top: 30px;
+}
+
+.batch-summary {
+    background-color: rgba(var(--bs-info-rgb), 0.1);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.feature-icon {
+    font-size: 2rem;
+    color: var(--bs-primary);
+    margin-bottom: 15px;
+}
+
+.feature-card {
+    height: 100%;
+    transition: all 0.3s ease;
+}
+
+.feature-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+}
+
+.results-section {
+    margin-top: 30px;
+}
+
+.table-responsive {
+    overflow-x: auto;
+}
+
+.table th {
+    background-color: var(--bs-gray-300);
+}
+
+/* Loading spinner */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    display: none;
+}
+
+.spinner-container {
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    text-align: center;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .upload-area {
+        padding: 20px;
+    }
+    
+    .feature-card {
+        margin-bottom: 20px;
+    }
+}

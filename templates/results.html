@@ -1,0 +1,149 @@
+{% extends "layout.html" %}
+
+{% block title %}Invoice OCR - Results{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-10 offset-md-1">
+        <div class="card shadow-sm">
+            <div class="card-header bg-success text-white">
+                <h4 class="mb-0"><i class="fas fa-check-circle"></i> Invoice Data Extracted</h4>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i> Review the extracted data below and make any necessary corrections before exporting to Excel.
+                </div>
+                
+                <form id="data-form" action="{{ url_for('update_data') }}" method="post">
+                    <!-- Header Information -->
+                    <div class="mb-4">
+                        <h5 class="card-title border-bottom pb-2"><i class="fas fa-info-circle"></i> Invoice Information</h5>
+                        
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="header_invoice_number" class="form-label">Invoice Number</label>
+                                <input type="text" class="form-control" id="header_invoice_number" name="header_invoice_number" value="{{ header.invoice_number }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="header_date" class="form-label">Date</label>
+                                <input type="text" class="form-control" id="header_date" name="header_date" value="{{ header.date }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="header_customer_name" class="form-label">Customer Name</label>
+                                <input type="text" class="form-control" id="header_customer_name" name="header_customer_name" value="{{ header.customer_name }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="header_customer_ref" class="form-label">Customer Reference</label>
+                                <input type="text" class="form-control" id="header_customer_ref" name="header_customer_ref" value="{{ header.customer_ref }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="header_vat_reg_no" class="form-label">VAT Registration No.</label>
+                                <input type="text" class="form-control" id="header_vat_reg_no" name="header_vat_reg_no" value="{{ header.vat_reg_no }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="header_business_reg_no" class="form-label">Business Registration No.</label>
+                                <input type="text" class="form-control" id="header_business_reg_no" name="header_business_reg_no" value="{{ header.business_reg_no }}">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Line Items -->
+                    <div class="mb-4">
+                        <h5 class="card-title border-bottom pb-2"><i class="fas fa-list"></i> Line Items</h5>
+                        
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Product Code</th>
+                                        <th>Quantity</th>
+                                        <th>Description</th>
+                                        <th>Unit Price</th>
+                                        <th>Discount</th>
+                                        <th>Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in line_items %}
+                                    <tr>
+                                        <td>
+                                            <input type="text" class="form-control" name="item_{{ loop.index0 }}_product_code" value="{{ item.product_code }}">
+                                        </td>
+                                        <td>
+                                            <input type="text" class="form-control" name="item_{{ loop.index0 }}_quantity" value="{{ item.quantity }}" data-type="numeric">
+                                        </td>
+                                        <td>
+                                            <input type="text" class="form-control" name="item_{{ loop.index0 }}_description" value="{{ item.description }}">
+                                        </td>
+                                        <td>
+                                            <input type="text" class="form-control" name="item_{{ loop.index0 }}_unit_price" value="{{ item.unit_price }}" data-type="numeric">
+                                        </td>
+                                        <td>
+                                            <input type="text" class="form-control" name="item_{{ loop.index0 }}_discount" value="{{ item.discount }}" data-type="numeric">
+                                        </td>
+                                        <td>
+                                            <input type="text" class="form-control" name="item_{{ loop.index0 }}_total" value="{{ item.total }}" data-type="numeric">
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <input type="hidden" name="item_count" value="{{ line_items|length }}">
+                    </div>
+                    
+                    <!-- Totals -->
+                    <div class="mb-4">
+                        <h5 class="card-title border-bottom pb-2"><i class="fas fa-calculator"></i> Totals</h5>
+                        
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label for="totals_subtotal" class="form-label">Subtotal</label>
+                                <input type="text" class="form-control" id="totals_subtotal" name="totals_subtotal" value="{{ totals.subtotal }}" data-type="numeric">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="totals_vat" class="form-label">VAT</label>
+                                <input type="text" class="form-control" id="totals_vat" name="totals_vat" value="{{ totals.vat }}" data-type="numeric">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="totals_grand_total" class="form-label">Grand Total</label>
+                                <input type="text" class="form-control" id="totals_grand_total" name="totals_grand_total" value="{{ totals.grand_total }}" data-type="numeric">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-success">
+                            <i class="fas fa-save"></i> Update & Generate Excel
+                        </button>
+                        <a href="{{ url_for('download_excel') }}" class="btn btn-primary">
+                            <i class="fas fa-file-excel"></i> Download Excel File
+                        </a>
+                        <a href="{{ url_for('reset') }}" class="btn btn-outline-secondary">
+                            <i class="fas fa-redo"></i> Start Over
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Add form validation
+    const dataForm = document.getElementById('data-form');
+    if (dataForm) {
+        dataForm.addEventListener('submit', function(e) {
+            if (!validateForm(this)) {
+                e.preventDefault();
+                showToast('Please check the highlighted fields for errors.', 'danger');
+            }
+        });
+    }
+});
+</script>
+{% endblock %}
