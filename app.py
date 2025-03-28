@@ -8,11 +8,16 @@ import tempfile
 import shutil
 import base64
 
+# Get log directory from environment variable or create a default
+logs_dir = os.environ.get('LOG_DIR', os.path.join(tempfile.gettempdir(), 'logs'))
+os.makedirs(logs_dir, exist_ok=True)
+log_file = os.path.join(logs_dir, 'flask-debug.log')
+
 # Setup logging first with file handler for detailed debugging
+# Using just stream handler to avoid file permission issues
 logging.basicConfig(level=logging.DEBUG,
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                    handlers=[
-                       logging.FileHandler('/tmp/logs/flask-debug.log'),
                        logging.StreamHandler()
                    ])
 logger = logging.getLogger(__name__)

@@ -1,9 +1,18 @@
 import logging
 import sys
+import os
+import tempfile
+
+# Ensure log directory exists
+logs_dir = os.path.join(tempfile.gettempdir(), 'logs')
+os.makedirs(logs_dir, exist_ok=True)
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+# Set the LOG_DIR environment variable for app.py to use
+os.environ['LOG_DIR'] = logs_dir
 
 try:
     from app import app
