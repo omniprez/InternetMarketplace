@@ -8,8 +8,13 @@ import tempfile
 import shutil
 import base64
 
-# Setup logging first
-logging.basicConfig(level=logging.DEBUG)
+# Setup logging first with file handler for detailed debugging
+logging.basicConfig(level=logging.DEBUG,
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                   handlers=[
+                       logging.FileHandler('/tmp/logs/flask-debug.log'),
+                       logging.StreamHandler()
+                   ])
 logger = logging.getLogger(__name__)
 
 # Import Flask and related dependencies with error handling

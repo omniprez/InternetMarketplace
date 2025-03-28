@@ -47,15 +47,26 @@ except ImportError:
     SKLEARN_AVAILABLE = False
 
 # Try to import TensorFlow with appropriate fallbacks
+TF_AVAILABLE = False
 try:
+    # First check if numpy is fully working
+    import numpy as np
+    test_array = np.array([1, 2, 3])
+    
+    # Only try importing TensorFlow if numpy is working properly
     import tensorflow as tf
     from tensorflow.keras.models import Sequential
     from tensorflow.keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPooling2D
+    
+    # Test TensorFlow functionality with a basic operation
+    test_tf = tf.constant([1, 2, 3])
+    
+    # Only mark as available if all the above succeeded
     TF_AVAILABLE = True
     logger.info("TensorFlow is available for enhanced field recognition")
-except ImportError:
+except ImportError as ie:
     TF_AVAILABLE = False
-    logger.warning("TensorFlow functionality unavailable. Using traditional OCR methods instead.")
+    logger.warning(f"TensorFlow functionality unavailable: {ie}. Using traditional OCR methods instead.")
 except Exception as e:
     TF_AVAILABLE = False
     logger.warning(f"TensorFlow loading error: {e}. Using traditional OCR methods instead.")
