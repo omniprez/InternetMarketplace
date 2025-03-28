@@ -373,6 +373,8 @@ function setupAIEnhancement() {
                 showToast('Using Edendale-specific invoice format recognition patterns', 'info');
             } else if (this.value === 'general') {
                 showToast('Using general invoice format recognition', 'info');
+            } else if (this.value === 'enhanced') {
+                showToast('Using enhanced OpenCV+ML processing for improved accuracy', 'success');
             } else {
                 showToast('Auto-detecting invoice format', 'info');
             }

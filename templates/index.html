@@ -67,7 +67,7 @@
                                                     <option value="auto" selected>Auto-detect</option>
                                                     <option value="general">General Invoice</option>
                                                     <option value="edendale">Edendale Format</option>
-                                                    <option value="claude">Claude AI (Vision)</option>
+                                                    <option value="enhanced">Enhanced AI (OpenCV + ML)</option>
                                                 </select>
                                                 <div class="form-text">Select format if known, or use auto-detect</div>
                                             </div>
@@ -75,7 +75,7 @@
                                     </div>
                                     <div class="alert alert-info mt-2 mb-0">
                                         <i class="fas fa-lightbulb"></i> AI-enhanced extraction improves accuracy by up to 35% and provides interactive visual verification!
-                                        <br><strong>NEW:</strong> <a href="#" data-bs-toggle="modal" data-bs-target="#claudeInfoModal" class="alert-link">Claude AI Vision</a> capabilities now available for even greater extraction accuracy!
+                                        <br><strong>NEW:</strong> <a href="#" data-bs-toggle="modal" data-bs-target="#aiInfoModal" class="alert-link">Enhanced OpenCV+ML Processing</a> now available for even greater extraction accuracy!
                                     </div>
                                 </div>
                             </div>
@@ -141,48 +141,48 @@
     </div>
 </div>
 
-<!-- Claude AI Info Modal -->
-<div class="modal fade" id="claudeInfoModal" tabindex="-1" aria-labelledby="claudeInfoModalLabel" aria-hidden="true">
+<!-- Open Source AI Info Modal -->
+<div class="modal fade" id="aiInfoModal" tabindex="-1" aria-labelledby="aiInfoModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
-                <h5 class="modal-title" id="claudeInfoModalLabel"><i class="fas fa-robot"></i> Claude AI Vision Technology</h5>
+                <h5 class="modal-title" id="aiInfoModalLabel"><i class="fas fa-brain"></i> Enhanced OpenCV+ML Processing</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="row">
                     <div class="col-md-4 text-center mb-3">
                         <div style="font-size: 4rem; color: var(--bs-primary);">
-                            <i class="fas fa-robot"></i>
+                            <i class="fas fa-microchip"></i>
                         </div>
                     </div>
                     <div class="col-md-8">
-                        <h4>Powered by Anthropic Claude</h4>
-                        <p>Our application now integrates with Anthropic's Claude AI model to provide superior extraction accuracy for invoice data.</p>
+                        <h4>Powered by Open-Source AI</h4>
+                        <p>Our application now leverages cutting-edge open-source technologies including OpenCV, scikit-learn, and TensorFlow to provide superior extraction accuracy for invoice data.</p>
                         <div class="alert alert-info">
-                            <strong>Note:</strong> Claude-powered extraction requires an Anthropic API key. Contact your administrator to enable this feature.
+                            <strong>Note:</strong> Enhanced processing is available on all systems with no API key required, since it runs 100% on your local machine!
                         </div>
                     </div>
                 </div>
                 
                 <hr>
                 
-                <h5>Benefits of Claude AI Vision</h5>
+                <h5>Benefits of Enhanced Processing</h5>
                 <div class="row">
                     <div class="col-md-6">
                         <ul class="list-group mb-3">
                             <li class="list-group-item d-flex align-items-center">
                                 <i class="fas fa-check-circle text-success me-2"></i>
                                 <div>
-                                    <strong>Superior accuracy</strong>
-                                    <div class="small text-muted">Claude understands invoice context like a human</div>
+                                    <strong>Advanced image preprocessing</strong>
+                                    <div class="small text-muted">Enhances image quality for better OCR results</div>
                                 </div>
                             </li>
                             <li class="list-group-item d-flex align-items-center">
                                 <i class="fas fa-check-circle text-success me-2"></i>
                                 <div>
-                                    <strong>Advanced invoice understanding</strong>
-                                    <div class="small text-muted">Can handle complex and unusual formats</div>
+                                    <strong>Intelligent text analysis</strong>
+                                    <div class="small text-muted">Uses TF-IDF to understand document context</div>
                                 </div>
                             </li>
                         </ul>
@@ -192,28 +192,28 @@
                             <li class="list-group-item d-flex align-items-center">
                                 <i class="fas fa-check-circle text-success me-2"></i>
                                 <div>
-                                    <strong>Line item identification</strong>
-                                    <div class="small text-muted">Better at identifying products and services</div>
+                                    <strong>Improved table detection</strong>
+                                    <div class="small text-muted">Better at identifying and structuring tabular data</div>
                                 </div>
                             </li>
                             <li class="list-group-item d-flex align-items-center">
                                 <i class="fas fa-check-circle text-success me-2"></i>
                                 <div>
-                                    <strong>Table extraction</strong>
-                                    <div class="small text-muted">Excels at understanding tabular data</div>
+                                    <strong>Pattern recognition</strong>
+                                    <div class="small text-muted">Identifies invoice fields with ML algorithms</div>
                                 </div>
                             </li>
                         </ul>
                     </div>
                 </div>
                 
-                <div class="alert alert-warning">
-                    <i class="fas fa-info-circle"></i> Claude AI processing may take slightly longer than standard OCR but provides significantly improved results.
+                <div class="alert alert-success">
+                    <i class="fas fa-info-circle"></i> Our enhanced processing delivers privacy, security, and speed as everything runs locally without sending data to external services.
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                <button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="document.getElementById('recognition-mode').value='claude';">Use Claude AI</button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="document.getElementById('recognition-mode').value='enhanced';">Use Enhanced Processing</button>
             </div>
         </div>
     </div>

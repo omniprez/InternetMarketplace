@@ -49,25 +49,26 @@ except ImportError as e:
     logger.error(f"Failed to import excel_generator: {e}")
     sys.exit(1)
 
-# Import Anthropic if available for potential Claude-based enhancements
-anthropic_client = None
+# Set up enhanced OCR capabilities with available libraries
+logger.info("Setting up enhanced OCR capabilities with OpenCV and scikit-learn")
+enhanced_ocr_available = False
+
 try:
-    import anthropic
-    # the newest Anthropic model is "claude-3-5-sonnet-20241022" which was released October 22, 2024
-    ANTHROPIC_KEY = os.environ.get('ANTHROPIC_API_KEY')
-    if ANTHROPIC_KEY:
-        try:
-            anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-            logger.info("Successfully initialized Anthropic client")
-        except Exception as e:
-            logger.error(f"Failed to initialize Anthropic client with provided key: {e}")
-            logger.warning("Claude-based enhancements will be disabled")
-    else:
-        logger.warning("Anthropic API key not found in environment variables. Claude-based enhancements will be disabled.")
+    import cv2
+    import numpy as np
+    enhanced_ocr_available = True
+    logger.info("Enhanced OCR capabilities available with OpenCV")
 except ImportError as e:
-    logger.warning(f"Anthropic library not available: {e}")
-except Exception as e:
-    logger.error(f"Error importing Anthropic module: {e}")
+    logger.warning(f"Enhanced OCR with OpenCV not available: {e}")
+    
+try:
+    from sklearn import feature_extraction, metrics
+    enhanced_ocr_available = enhanced_ocr_available and True
+    logger.info("Text analysis capabilities available with scikit-learn")
+except ImportError as e:
+    logger.warning(f"Text analysis with scikit-learn not available: {e}")
+    
+# No need for Anthropic/Claude integration - using purely open-source methods
 
 # Try to import the AI field recognizer with graceful fallback
 field_recognizer = None
@@ -79,35 +80,28 @@ except Exception as e:
     logger.error(f"Failed to initialize AI field recognizer: {e}")
     logger.warning("Continuing without AI field recognition capabilities")
     
-    # Create enhanced fallback for the field_recognizer with Anthropic capabilities if available
+    # Create enhanced fallback recognizer with open-source libraries for improved OCR accuracy
     class FallbackFieldRecognizer:
         def __init__(self):
-            # Store reference to Anthropic client from outer scope
-            self.anthropic_client = anthropic_client
+            # Use flags to determine which enhanced capabilities are available
+            self.enhanced_ocr = enhanced_ocr_available
             
-            # Set use_claude based on whether client is available
-            self.use_claude = False
-            if self.anthropic_client is not None:
-                try:
-                    # Verify the client is properly initialized by checking an attribute
-                    client_vars = dir(self.anthropic_client)
-                    if 'messages' in client_vars or hasattr(self.anthropic_client, 'messages'):
-                        self.use_claude = True
-                        logger.info("FallbackFieldRecognizer will use Claude for enhanced extraction")
-                    else:
-                        logger.warning("Anthropic client lacks expected 'messages' attribute")
-                        logger.info("FallbackFieldRecognizer will use traditional OCR only")
-                except Exception as e:
-                    logger.error(f"Error verifying Anthropic client: {e}")
-                    logger.info("FallbackFieldRecognizer will use traditional OCR only")
+            # Additional thresholds for extraction confidence
+            self.table_detection_threshold = 0.6
+            self.field_confidence_threshold = 0.7
+            
+            # No API connections used - pure open-source methods
+            
+            if self.enhanced_ocr:
+                logger.info("Enhanced OCR field recognition enabled with OpenCV and scikit-learn")
             else:
-                logger.info("Anthropic client not available, FallbackFieldRecognizer will use traditional OCR only")
+                logger.info("Enhanced OCR not available - using basic OCR only")
                 
         def process_invoice(self, image_path):
-            """Process the invoice with the basic OCR and optional Claude enhancement"""
-            logger.info(f"Using fallback processor for {image_path}")
+            """Process the invoice with enhanced OCR if available, otherwise fallback to basic"""
+            logger.info(f"Processing invoice with FallbackFieldRecognizer: {image_path}")
             
-            # Delegate to the standard invoice processor first
+            # Start with standard OCR processing
             from invoice_parser import process_image
             result = process_image(image_path)
             
@@ -115,124 +109,355 @@ except Exception as e:
             extraction_result = {
                 'fields': {k: v for k, v in result.get('header', {}).items()},
                 'line_items': result.get('line_items', []),
-                'visualization_data': None
+                'visualization_data': None,
+                'enhanced': False
             }
             
-            # Use Claude to enhance extraction if available
-            if self.use_claude and os.path.exists(image_path):
+            # Apply enhanced processing if libraries are available
+            if self.enhanced_ocr and os.path.exists(image_path):
                 try:
-                    logger.info("Attempting Claude-based enhancement")
-                    # Verify the Anthropic client is properly initialized
-                    if self.anthropic_client is None:
-                        logger.error("Anthropic client is None despite use_claude being True")
-                        raise ValueError("Anthropic client not properly initialized")
+                    logger.info("Applying enhanced image processing with OpenCV")
                     
-                    # Read the image as base64 for Claude
-                    with open(image_path, "rb") as img_file:
-                        base64_image = base64.b64encode(img_file.read()).decode("utf-8")
+                    # Load image with OpenCV for enhancement
+                    image = cv2.imread(image_path)
+                    if image is None:
+                        logger.warning(f"Could not read image at {image_path} with OpenCV")
+                        return extraction_result
                     
-                    logger.info("Image read successfully, sending to Claude API")
+                    # Apply preprocessing to improve OCR quality
+                    # Convert to grayscale
+                    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
                     
-                    # Check which model to use - the newest model is preferred but fallback to older models if needed
-                    # the newest Anthropic model is "claude-3-5-sonnet-20241022" which was released October 22, 2024
-                    model_to_use = "claude-3-opus-20240229"  # Fallback to a known model that should exist 
-                    
-                    try:
-                        # Try to get available models
-                        logger.info(f"Using model: {model_to_use}")
-                    except Exception as model_err:
-                        logger.warning(f"Error getting models: {model_err}, using default model")
-                    
-                    # Create the message request
-                    response = self.anthropic_client.messages.create(
-                        model=model_to_use,
-                        max_tokens=1500,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": """Please extract all relevant invoice information from this image. 
-                                        Return the data in this exact JSON format:
-                                        {
-                                            "invoice_number": "...",
-                                            "date": "...",
-                                            "vendor": "...",
-                                            "total": "...",
-                                            "line_items": [
-                                                {"description": "...", "quantity": "...", "unit_price": "...", "total": "..."},
-                                                ...
-                                            ]
-                                        }
-                                        
-                                        Only output valid JSON - no explanations or other text. If you can't determine a field, use null or an empty string."""
-                                    },
-                                    {
-                                        "type": "image",
-                                        "source": {
-                                            "type": "base64",
-                                            "media_type": "image/jpeg",
-                                            "data": base64_image
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
+                    # Apply adaptive thresholding for better text extraction
+                    binary = cv2.adaptiveThreshold(
+                        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                        cv2.THRESH_BINARY, 11, 2
                     )
                     
-                    # Extract the JSON response text
-                    json_text = response.content[0].text
+                    # Remove noise with morphological operations
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+                    cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
                     
-                    # Try to parse the JSON
+                    # Use enhanced binary image for improved OCR
+                    # First, save the enhanced image to a temporary file
+                    enhanced_path = image_path + "_enhanced.jpg"
+                    cv2.imwrite(enhanced_path, cleaned)
+                    
+                    # Run improved OCR on the enhanced image
+                    import pytesseract
+                    ocr_text = pytesseract.image_to_string(enhanced_path)
+                    
+                    # Use scikit-learn enhanced text analysis if available
                     try:
-                        claude_data = json.loads(json_text)
+                        # Use TF-IDF to identify important keywords in invoice
+                        from sklearn.feature_extraction.text import TfidfVectorizer
                         
-                        # Claude produced nice JSON - merge with our OCR results
-                        # For fields, prefer Claude's extraction if it has values
-                        if claude_data.get('invoice_number'):
-                            extraction_result['fields']['invoice_number'] = claude_data['invoice_number']
-                        if claude_data.get('date'):
-                            extraction_result['fields']['date'] = claude_data['date']
-                        if claude_data.get('vendor'):
-                            extraction_result['fields']['vendor'] = claude_data['vendor']
-                        if claude_data.get('total'):
-                            extraction_result['fields']['total'] = claude_data['total']
+                        # Break text into individual lines for analysis
+                        lines = [line for line in ocr_text.split('\n') if line.strip()]
                         
-                        # For line items, use Claude's if it found more than what we already have
-                        claude_line_items = claude_data.get('line_items', [])
-                        if len(claude_line_items) > len(extraction_result['line_items']):
-                            # Format Claude's line items to match our expected format
-                            formatted_items = []
-                            for item in claude_line_items:
-                                formatted_item = {
-                                    'description': item.get('description', ''),
-                                    'quantity': item.get('quantity', ''),
-                                    'unit_price': item.get('unit_price', ''),
-                                    'total': item.get('total', '')
-                                }
-                                formatted_items.append(formatted_item)
-                            extraction_result['line_items'] = formatted_items
+                        # Create a TF-IDF vectorizer focused on invoice terminology
+                        vectorizer = TfidfVectorizer(
+                            min_df=1, stop_words='english', 
+                            ngram_range=(1, 2)  # Use unigrams and bigrams
+                        )
+                        
+                        # Transform the text data
+                        tfidf_matrix = vectorizer.fit_transform(lines)
+                        
+                        # Get feature names (terms)
+                        feature_names = vectorizer.get_feature_names_out()
+                        
+                        # Extract important invoice terms with their scores
+                        # For each line, find the most important terms
+                        important_terms = []
+                        for i, line in enumerate(lines):
+                            feature_index = tfidf_matrix[i, :].nonzero()[1]
+                            tfidf_scores = zip(
+                                [feature_names[x] for x in feature_index],
+                                [tfidf_matrix[i, x] for x in feature_index]
+                            )
+                            # Sort by score
+                            sorted_terms = sorted(tfidf_scores, key=lambda x: x[1], reverse=True)
+                            important_terms.append((line, sorted_terms[:3]))  # Top 3 terms
+                        
+                        # Improve field recognition based on important terms
+                        improved_fields = {}
+                        for line, terms in important_terms:
+                            line_lower = line.lower()
                             
-                        logger.info("Successfully enhanced extraction with Claude")
-                        # Store the raw Claude response for visualization
-                        extraction_result['claude_response'] = json_text
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"Could not parse Claude response as JSON: {e}")
+                            # Look for invoice number with better pattern matching
+                            if any(t[0] in ['invoice', 'inv', 'invoice number', 'inv no'] for t in terms):
+                                # Extract invoice number with smarter pattern matching
+                                import re
+                                inv_match = re.search(r'(?:invoice|inv)(?:\s+number|\s+no)?[:#\s]*([A-Z0-9\-]+)', line_lower)
+                                if inv_match:
+                                    improved_fields['invoice_number'] = inv_match.group(1).strip()
+                                    
+                            # Look for dates with better pattern recognition
+                            if any(t[0] in ['date', 'issued', 'invoice date'] for t in terms):
+                                # Extract date with comprehensive pattern matching
+                                date_patterns = [
+                                    r'(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4})',  # DD/MM/YYYY, MM/DD/YYYY
+                                    r'(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})',  # DD Mon YYYY
+                                    r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{2,4})'  # Mon DD, YYYY
+                                ]
+                                
+                                for pattern in date_patterns:
+                                    date_match = re.search(pattern, line, re.IGNORECASE)
+                                    if date_match:
+                                        improved_fields['date'] = date_match.group(1).strip()
+                                        break
+                                        
+                            # Look for vendor information
+                            if any(t[0] in ['from', 'vendor', 'supplier', 'company'] for t in terms):
+                                # Look for vendor name using patterns
+                                if 'vendor' not in improved_fields and len(line) > 5:
+                                    if not any(w in line_lower for w in ['invoice', 'total', 'subtotal', 'date']):
+                                        improved_fields['vendor'] = line.strip()
+                            
+                            # Look for totals with better pattern matching
+                            if any(t[0] in ['total', 'amount', 'due', 'balance', 'amount due'] for t in terms):
+                                # Extract amount with comprehensive pattern
+                                total_match = re.search(r'(?:total|amount|due|balance)[:\s]*[$€£]?\s*(\d+[,\d]*\.\d+|\d+[,\d]*)', line_lower)
+                                if total_match:
+                                    # Clean up the total value
+                                    total_str = total_match.group(1).replace(',', '')
+                                    try:
+                                        improved_fields['total'] = total_str
+                                    except:
+                                        # Just use the string as is if conversion fails
+                                        improved_fields['total'] = total_match.group(1).strip()
+                                    
+                        # Update extraction results with improved fields
+                        for field, value in improved_fields.items():
+                            if value:  # Only update if we have a value
+                                extraction_result['fields'][field] = value
+                        
+                        # Try to improve line item detection
+                        line_items = self._detect_line_items_from_text(ocr_text)
+                        if line_items and len(line_items) > len(extraction_result['line_items']):
+                            extraction_result['line_items'] = line_items
+                            
+                        # Attempt to detect and parse table structures if OpenCV is available
+                        try:
+                            table_regions = self._detect_tables(image)
+                            if table_regions:
+                                # Process each detected table region
+                                for i, (x, y, w, h) in enumerate(table_regions):
+                                    table_img = image[y:y+h, x:x+w]
+                                    table_items = self._extract_table_data(table_img)
+                                    if table_items and len(table_items) > len(extraction_result['line_items']):
+                                        extraction_result['line_items'] = table_items
+                        except Exception as table_err:
+                            logger.warning(f"Table detection failed: {table_err}")
+                        
+                        # Mark that enhanced processing was applied
+                        extraction_result['enhanced'] = True
+                        logger.info("Successfully applied enhanced OCR and text analysis")
+                        
+                    except Exception as sklearn_err:
+                        logger.warning(f"Enhanced text analysis failed: {sklearn_err}")
+                    
+                    # Clean up temporary file
+                    try:
+                        os.remove(enhanced_path)
+                    except:
+                        pass
+                        
                 except Exception as e:
-                    logger.error(f"Error using Claude for enhancement: {e}")
+                    logger.error(f"Enhanced image processing failed: {e}")
             
             return extraction_result
+        
+        def _detect_line_items_from_text(self, text):
+            """Enhanced line item detection from text"""
+            line_items = []
+            lines = text.split('\n')
+            
+            # Look for blocks of text that appear to be line items
+            in_line_items_section = False
+            item_candidates = []
+            
+            # Keywords that indicate start of line items section
+            item_section_indicators = ['item', 'description', 'product', 'service', 'quantity', 'qty', 'price', 'amount']
+            
+            # Try to extract line items
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                # Check if this line could be a header for line items
+                if not in_line_items_section:
+                    line_lower = line.lower()
+                    # Check if this looks like a table header
+                    if sum(1 for indicator in item_section_indicators if indicator in line_lower) >= 2:
+                        in_line_items_section = True
+                        continue
+                
+                # If we're in the line items section, collect potential items
+                if in_line_items_section:
+                    # Skip lines that are likely to be section headers
+                    if any(header in line.lower() for header in ['subtotal', 'total', 'tax', 'shipping', 'discount']):
+                        continue
+                        
+                    # Skip very short lines
+                    if len(line) < 5:
+                        continue
+                        
+                    # If line contains numbers and text, it's a candidate for a line item
+                    if any(c.isdigit() for c in line) and any(c.isalpha() for c in line):
+                        item_candidates.append(line)
+            
+            # Process item candidates into structured data
+            for item in item_candidates:
+                # Try to extract components - this is simplified and would need
+                # more sophisticated parsing in a real implementation
+                parts = item.split()
+                
+                # Skip if too few parts
+                if len(parts) < 2:
+                    continue
+                
+                # Try to identify description, quantity, unit price and total
+                line_item = {'description': '', 'quantity': '', 'unit_price': '', 'total': ''}
+                
+                # Simple heuristic - assume first parts are description, last numeric part is total
+                # and if enough parts, try to extract quantity and unit price
+                
+                # Extract description (take first part of the line, up to 70% of words)
+                desc_end = max(1, int(len(parts) * 0.7))
+                line_item['description'] = ' '.join(parts[:desc_end])
+                
+                # Look for numeric values in the remaining parts
+                numeric_parts = []
+                for i in range(desc_end, len(parts)):
+                    # Clean up the part to extract numeric value
+                    clean_part = parts[i].strip('$€£,.;:()-')
+                    if any(c.isdigit() for c in clean_part):
+                        numeric_parts.append(parts[i])
+                
+                # If we have numeric parts, try to assign them
+                if len(numeric_parts) >= 1:
+                    line_item['total'] = numeric_parts[-1]  # Last numeric value is likely total
+                
+                if len(numeric_parts) >= 2:
+                    line_item['unit_price'] = numeric_parts[-2]  # Second to last is likely unit price
+                
+                if len(numeric_parts) >= 3:
+                    line_item['quantity'] = numeric_parts[-3]  # Third to last is likely quantity
+                
+                # Add the item to our results
+                line_items.append(line_item)
+            
+            return line_items
+        
+        def _detect_tables(self, image):
+            """Detect table regions in an image using OpenCV"""
+            # Convert to grayscale
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            
+            # Threshold 
+            _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+            
+            # Dilate to connect nearby elements
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+            dilated = cv2.dilate(thresh, kernel, iterations=2)
+            
+            # Find contours
+            contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Look for rectangular contours that might be tables
+            table_regions = []
+            for contour in contours:
+                # Get bounding rectangle
+                x, y, w, h = cv2.boundingRect(contour)
+                
+                # Tables typically have certain aspect ratios and sizes
+                aspect_ratio = w / float(h)
+                if 1.0 < aspect_ratio < 10.0 and w > image.shape[1] * 0.3 and h > 50:
+                    table_regions.append((x, y, w, h))
+            
+            return table_regions
+            
+        def _extract_table_data(self, table_image):
+            """Extract structured data from a table image"""
+            # This is a simplified implementation - in a real app, would use a more
+            # sophisticated method to extract tabular data from images
+            
+            # Convert to grayscale
+            gray = cv2.cvtColor(table_image, cv2.COLOR_BGR2GRAY)
+            
+            # Get text using pytesseract
+            import pytesseract
+            data = pytesseract.image_to_data(gray, output_type=pytesseract.Output.DICT)
+            
+            # Process the OCR data to extract lines
+            # Group text by line
+            line_items = []
+            
+            # Group text data by line
+            line_texts = {}
+            for i in range(len(data['text'])):
+                if data['text'][i].strip():
+                    line_num = data['line_num'][i]
+                    if line_num not in line_texts:
+                        line_texts[line_num] = []
+                    line_texts[line_num].append((data['left'][i], data['text'][i]))
+            
+            # Sort each line by horizontal position and join
+            lines = []
+            for line_num in sorted(line_texts.keys()):
+                sorted_line = sorted(line_texts[line_num])
+                text = ' '.join(text for _, text in sorted_line)
+                lines.append(text)
+                
+            # Skip first line which is often a header
+            if len(lines) > 1:
+                lines = lines[1:]
+                
+            # Process each line into a line item
+            # This is a simplistic approach - real implementation would be more sophisticated
+            for line in lines:
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                    
+                # Create a line item
+                line_item = {'description': '', 'quantity': '', 'unit_price': '', 'total': ''}
+                
+                # Simple heuristic parsing as in _detect_line_items_from_text
+                desc_end = max(1, int(len(parts) * 0.7))
+                line_item['description'] = ' '.join(parts[:desc_end])
+                
+                numeric_parts = []
+                for i in range(desc_end, len(parts)):
+                    clean_part = parts[i].strip('$€£,.;:()-')
+                    if any(c.isdigit() for c in clean_part):
+                        numeric_parts.append(parts[i])
+                
+                if len(numeric_parts) >= 1:
+                    line_item['total'] = numeric_parts[-1]
+                if len(numeric_parts) >= 2:
+                    line_item['unit_price'] = numeric_parts[-2]
+                if len(numeric_parts) >= 3:
+                    line_item['quantity'] = numeric_parts[-3]
+                
+                line_items.append(line_item)
+                
+            return line_items
             
         def generate_visualization(self, extraction_result):
             """Generate visualization HTML for the extraction results"""
-            # If we have Claude data, show a fancier visualization
-            if self.use_claude and extraction_result.get('claude_response'):
+            # Create visualization based on whether enhanced processing was applied
+            is_enhanced = extraction_result.get('enhanced', False)
+            
+            if is_enhanced:
                 html = f"""
                 <div class="ai-enhanced-preview">
-                    <h4>AI-Enhanced Extraction Preview</h4>
+                    <h4>Enhanced Extraction Preview</h4>
                     <div class="alert alert-info">
-                        <strong>Success:</strong> Claude AI has enhanced this extraction with advanced vision capabilities.
+                        <strong>Success:</strong> Open-source AI enhancement with OpenCV and scikit-learn applied.
                     </div>
                     
                     <div class="card mb-3">
@@ -302,10 +527,10 @@ except Exception as e:
                 return """
                 <div class="basic-preview">
                     <h4>Basic Extraction Preview</h4>
-                    <div class="alert alert-warning">
-                        <strong>Note:</strong> Using traditional OCR. For enhanced accuracy, enable Anthropic Claude AI in settings.
+                    <div class="alert alert-info">
+                        <strong>Note:</strong> Using standard OCR technology for invoice data extraction.
                     </div>
-                    <p>The basic extraction process has identified invoice fields and line items using OCR technology.</p>
+                    <p>The extraction process has identified invoice fields and line items using OCR technology.</p>
                     <p>Review the extracted data below and make any necessary corrections before proceeding.</p>
                 </div>
                 """
@@ -376,6 +601,11 @@ def upload_file():
             ai_enhanced = request.form.get('ai_enhanced', 'true') == 'true'
             enhancement_level = request.form.get('enhancement_level', 'medium')
             recognition_mode = request.form.get('recognition_mode', 'auto')
+            
+            # Check if enhanced mode is specifically requested
+            if recognition_mode == 'enhanced':
+                ai_enhanced = True  # Force AI enhancement if enhanced mode is selected
+                logger.info("Enhanced OpenCV+ML processing requested")
             
             # Store settings in session (with serializable values only)
             session['extraction_settings'] = {
