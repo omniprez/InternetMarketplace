@@ -99,94 +99,139 @@ def extract_text(preprocessed_image):
 
 def extract_table_data(image_path):
     """
-    Enhanced table extraction using computer vision techniques
+    Enhanced table extraction using computer vision techniques with more robust error handling
     """
-    # Read the original image
-    img = cv2.imread(image_path)
-    original_img = img.copy()
-    
-    # Convert to grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    
-    # Apply preprocessing specifically for table structure detection
-    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    
-    # Apply morphological operations to identify table structure
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    dilated = cv2.dilate(thresh, kernel, iterations=1)
-    
-    # Find contours of table-like structures
-    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # Sort contours by area (largest first) to identify table regions
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)
-    
-    table_data_list = []
-    
-    # Try to identify the main table region
-    table_region = None
-    min_table_area = 0.1 * img.shape[0] * img.shape[1]  # Minimum 10% of image area
-    
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area > min_table_area:
-            x, y, w, h = cv2.boundingRect(contour)
-            # Check if this is likely to be a table (width > height / 3)
-            if w > h / 3:
-                table_region = (x, y, w, h)
-                break
-    
-    # If we found a table region, extract it and process
-    if table_region:
-        x, y, w, h = table_region
-        table_img = original_img[y:y+h, x:x+w]
-        
-        # Apply OCR specifically to the table region
-        custom_config = r'--oem 3 --psm 6 -c preserve_interword_spaces=1'
-        table_text = pytesseract.image_to_string(table_img, config=custom_config)
-        
-        # Process the table text
-        lines = table_text.strip().split('\n')
-        
-        # Try to identify header row
-        header_row = None
-        for i, line in enumerate(lines):
-            if 'Product' in line and 'Code' in line and ('Quantity' in line or 'Description' in line):
-                header_row = i
-                break
-        
-        # Process table rows
-        if header_row is not None:
-            # Get column positions from header
-            header = lines[header_row]
+    try:
+        # Read the original image
+        img = cv2.imread(image_path)
+        if img is None:
+            logger.error(f"Could not read image from {image_path}")
+            return []
             
-            # Extract data from rows below header
-            for i in range(header_row + 1, len(lines)):
-                line = lines[i].strip()
-                if line and any(char.isdigit() for char in line):  # Ensure line has at least one digit
-                    row_dict = {'text': line}
-                    table_data_list.append(row_dict)
-    
-    # If table detection failed, fallback to processing the whole image
-    if not table_data_list:
-        # Use Tesseract's built-in table detection
-        custom_config = r'--oem 3 --psm 6 -c preserve_interword_spaces=1'
-        data = pytesseract.image_to_data(gray, config=custom_config, output_type=pytesseract.Output.DICT)
+        original_img = img.copy()
         
-        for i in range(len(data['text'])):
-            if int(data['conf'][i]) > 60:  # Only include confident detections
-                text = data['text'][i].strip()
-                if text and any(char.isdigit() for char in text):  # Line has text and at least one digit
-                    row_dict = {
-                        'text': text,
-                        'left': data['left'][i],
-                        'top': data['top'][i],
-                        'width': data['width'][i],
-                        'height': data['height'][i]
-                    }
-                    table_data_list.append(row_dict)
+        # Convert to grayscale
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        table_data_list = []
+        
+        # Method 1: Try to use line-based extraction from direct OCR
+        try:
+            # Process the full image as text first - simpler and less prone to errors
+            # Use a more reliable configuration
+            simple_config = r'--oem 3 --psm 4'  # Assume single column of text
+            full_text = pytesseract.image_to_string(gray, config=simple_config)
+            
+            # Extract lines that look like table rows
+            lines = full_text.strip().split('\n')
+            for line in lines:
+                clean_line = line.strip()
+                # Only consider lines that have numbers and enough content to be a table row
+                if clean_line and len(clean_line) > 10 and any(char.isdigit() for char in clean_line):
+                    # Check if line starts with what looks like a product code
+                    if re.match(r'^\d{5,}', clean_line) or re.match(r'^[A-Z0-9]{6,}', clean_line):
+                        row_dict = {'text': clean_line}
+                        table_data_list.append(row_dict)
+        except Exception as e:
+            logger.warning(f"Simple OCR extraction failed: {str(e)}")
+        
+        # If we already have some data, return it
+        if len(table_data_list) >= 3:  # If we found at least 3 rows, consider it successful
+            logger.info(f"Found {len(table_data_list)} table rows using simple line extraction")
+            return table_data_list
+            
+        # Method 2: Try more complex table extraction only if the simple method didn't work well
+        try:
+            # Apply preprocessing specifically for table structure detection
+            _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            
+            # Apply morphological operations to identify table structure
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            dilated = cv2.dilate(thresh, kernel, iterations=1)
+            
+            # Find contours of table-like structures
+            contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Filter and sort contours by area
+            valid_contours = []
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                if area > 1000:  # Minimum area threshold
+                    valid_contours.append(contour)
+            
+            valid_contours = sorted(valid_contours, key=cv2.contourArea, reverse=True)
+            
+            # Try to identify the main table region
+            table_region = None
+            for contour in valid_contours[:5]:  # Check top 5 contours only
+                x, y, w, h = cv2.boundingRect(contour)
+                # Check if this is likely to be a table (reasonable width and height)
+                if w > 300 and h > 100:
+                    table_region = (x, y, w, h)
+                    break
+            
+            # If we found a table region, extract it and process
+            if table_region:
+                x, y, w, h = table_region
+                table_img = original_img[y:y+h, x:x+w]
+                
+                # Apply OCR specifically to the table region
+                custom_config = r'--oem 3 --psm 6'
+                table_text = pytesseract.image_to_string(table_img, config=custom_config)
+                
+                # Process the table text
+                lines = table_text.strip().split('\n')
+                
+                # Extract rows that look like table data
+                for line in lines:
+                    clean_line = line.strip()
+                    if clean_line and len(clean_line) > 10 and any(char.isdigit() for char in clean_line):
+                        parts = clean_line.split()
+                        # Check if first part looks like a product code
+                        if len(parts) >= 4 and (re.match(r'^\d+', parts[0]) or re.match(r'^[A-Z0-9]{5,}', parts[0])):
+                            row_dict = {'text': clean_line}
+                            table_data_list.append(row_dict)
+        except Exception as e:
+            logger.warning(f"Complex table extraction failed: {str(e)}")
+            
+        # Method 3: Fallback to direct structure detection (only if we still don't have data)
+        if not table_data_list:
+            try:
+                # Split the image into horizontal sections and process each
+                height, width = gray.shape
+                num_sections = 5
+                section_height = height // num_sections
+                
+                for i in range(num_sections):
+                    # Define section boundaries
+                    y_start = i * section_height
+                    y_end = (i + 1) * section_height if i < num_sections - 1 else height
+                    
+                    # Extract section
+                    section = gray[y_start:y_end, 0:width]
+                    
+                    # OCR the section
+                    section_config = r'--oem 3 --psm 6'
+                    section_text = pytesseract.image_to_string(section, config=section_config)
+                    
+                    # Process lines from this section
+                    section_lines = section_text.strip().split('\n')
+                    for line in section_lines:
+                        clean_line = line.strip()
+                        if clean_line and len(clean_line) > 10 and any(char.isdigit() for char in clean_line):
+                            parts = re.split(r'\s+', clean_line)
+                            if len(parts) >= 4:
+                                row_dict = {'text': clean_line}
+                                table_data_list.append(row_dict)
+            except Exception as e:
+                logger.warning(f"Sectional extraction failed: {str(e)}")
+        
+        return table_data_list
     
-    return table_data_list
+    except Exception as e:
+        logger.error(f"Error in table extraction: {str(e)}")
+        # Return empty list on error, the system will fall back to other extraction methods
+        return []
 
 def parse_invoice_header(text):
     """
