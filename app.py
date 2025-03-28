@@ -1143,6 +1143,33 @@ def reset():
     flash('Data has been reset. You can upload a new invoice.', 'info')
     return redirect(url_for('index'))
 
+@app.route('/image/<filename>')
+def serve_image(filename):
+    """Serve invoice images for visualization"""
+    # Get the file path from session
+    file_path = session.get('file_path', '')
+    
+    # Check if this is the image we're looking for
+    if file_path and os.path.basename(file_path) == filename:
+        try:
+            return send_file(file_path, mimetype='image/jpeg')
+        except Exception as e:
+            logger.error(f"Error serving image file: {e}")
+            return "Image not found", 404
+    
+    # Try to locate the file in the temp directory
+    temp_dir = '/tmp'
+    for root, dirs, files in os.walk(temp_dir):
+        if filename in files:
+            full_path = os.path.join(root, filename)
+            try:
+                return send_file(full_path, mimetype='image/jpeg')
+            except Exception as e:
+                logger.error(f"Error serving image file: {e}")
+                break
+    
+    return "Image not found", 404
+
 @app.errorhandler(413)
 def request_entity_too_large(error):
     flash('File too large. Maximum file size is 16MB.', 'danger')

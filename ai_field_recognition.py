@@ -197,16 +197,15 @@ class AIFieldRecognizer:
         logger.info("Creating simplified visualization without complex image processing")
         
         try:
-            # Try to encode the image as base64 for visualization
-            image_data = ""
+            # Store the image path instead of encoding image data
+            image_filename = ""
             if image_path and os.path.exists(image_path):
                 try:
-                    with open(image_path, 'rb') as f:
-                        image_bytes = f.read()
-                        image_data = base64.b64encode(image_bytes).decode('utf-8')
-                        logger.info("Successfully encoded image for visualization")
+                    # Just store the filename for later retrieval
+                    image_filename = os.path.basename(image_path)
+                    logger.info(f"Using image path for visualization: {image_filename}")
                 except Exception as e:
-                    logger.error(f"Error encoding image for visualization: {e}")
+                    logger.error(f"Error referencing image for visualization: {e}")
             
             # Create simple field visualization data
             field_visualizations = []
@@ -221,7 +220,7 @@ class AIFieldRecognizer:
                 y_position += 40  # Increment Y position for next field
             
             visualization_data = {
-                'image': image_data,  # Use 'image' key to match existing visualization format
+                'image_filename': image_filename,  # Store just the filename instead of entire image data
                 'fields': field_visualizations,
                 'tables': []  # No complex table detection in simplified version
             }
@@ -232,7 +231,7 @@ class AIFieldRecognizer:
         except Exception as e:
             logger.error(f"Error in simplified visualization: {e}")
             return {
-                'image': "",
+                'image_filename': "",
                 'fields': [{'label': 'Error', 'value': str(e)[:100], 'bbox': [10, 10, 100, 20]}],
                 'tables': []
             }
@@ -359,8 +358,8 @@ class AIFieldRecognizer:
                 vis_data = extraction_result.get('visualization', None)
                 has_visualization = (vis_data is not None and 
                                     isinstance(vis_data, dict) and
-                                    'image' in vis_data and 
-                                    vis_data['image'])
+                                    'image_filename' in vis_data and 
+                                    vis_data['image_filename'])
             except Exception as vis_error:
                 logger.error(f"Error checking visualization data: {vis_error}")
                 has_visualization = False
@@ -465,20 +464,20 @@ class AIFieldRecognizer:
             if has_visualization:
                 try:
                     vis_data = extraction_result['visualization']
-                    image_data = vis_data.get('image', '')
+                    image_filename = vis_data.get('image_filename', '')
                     
-                    # Validate the image data is a string that can be displayed
-                    if isinstance(image_data, str) and image_data:
+                    # Validate the image filename is a string that can be displayed
+                    if isinstance(image_filename, str) and image_filename:
                         html += f"""
                             <div class="col-md-6">
                                 <h4>Visual Extraction</h4>
                                 <div class="visual-preview text-center">
-                                    <img src="data:image/png;base64,{image_data}" class="img-fluid extraction-image">
+                                    <img src="/image/{image_filename}" class="img-fluid extraction-image">
                                 </div>
                             </div>
                         """
                     else:
-                        raise ValueError("Invalid image data format")
+                        raise ValueError("Invalid image filename format")
                 except Exception as vis_error:
                     logger.error(f"Error rendering visualization: {vis_error}")
                     html += """
