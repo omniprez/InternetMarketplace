@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def preprocess_image(image_path):
     """
-    Enhanced preprocessing to improve OCR accuracy with multiple techniques
+    Optimized preprocessing to improve OCR accuracy while maintaining performance
     """
     # Read the image
     img = cv2.imread(image_path)
@@ -21,170 +21,148 @@ def preprocess_image(image_path):
     if img is None:
         raise ValueError(f"Could not read image from {image_path}")
     
-    # Get image dimensions
+    # Resize large images to improve performance while maintaining quality
+    max_dimension = 2000  # Maximum width or height
     height, width = img.shape[:2]
+    if height > max_dimension or width > max_dimension:
+        scale = max_dimension / max(height, width)
+        new_width = int(width * scale)
+        new_height = int(height * scale)
+        img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        logger.info(f"Resized image from {width}x{height} to {new_width}x{new_height}")
     
     # Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # Check if the image needs to be deskewed
-    # Calculate skew angle
-    coords = np.column_stack(np.where(gray > 0))
-    angle = cv2.minAreaRect(coords)[-1]
+    # Simple deskew if needed - using faster approach
+    try:
+        # Check if the image needs to be deskewed
+        # Calculate skew angle - only on a sample of points to improve performance
+        sample_step = 10  # Only use every 10th point
+        coords = np.column_stack(np.where(gray[::sample_step, ::sample_step] > 0))
+        if len(coords) > 100:  # Only if we have enough points
+            angle = cv2.minAreaRect(coords)[-1]
+            
+            # Adjust angle
+            if angle < -45:
+                angle = -(90 + angle)
+            else:
+                angle = -angle
+                
+            # Only deskew if the angle is significant
+            if abs(angle) > 1.0:  # Only correct more significant angles
+                # Rotate the image to deskew it
+                (h, w) = gray.shape[:2]
+                center = (w // 2, h // 2)
+                M = cv2.getRotationMatrix2D(center, angle, 1.0)
+                gray = cv2.warpAffine(gray, M, (w, h), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_REPLICATE)
+    except Exception as e:
+        logger.warning(f"Skipping deskew due to error: {str(e)}")
     
-    # Adjust angle
-    if angle < -45:
-        angle = -(90 + angle)
-    else:
-        angle = -angle
-        
-    # Only deskew if the angle is significant
-    if abs(angle) > 0.5:
-        # Rotate the image to deskew it
-        (h, w) = gray.shape[:2]
-        center = (w // 2, h // 2)
-        M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        rotated = cv2.warpAffine(gray, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-        gray = rotated
+    # Use simpler but effective preprocessing approach - focus on performance
     
-    # Create multiple processed versions of the image for better OCR
-    preprocessed_images = []
-    
-    # Version 1: Basic adaptive thresholding (good for clean documents)
+    # Basic adaptive thresholding
     binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-    preprocessed_images.append(binary)
     
-    # Version 2: Stronger adaptive thresholding (good for low contrast)
-    binary_strong = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 3)
-    preprocessed_images.append(binary_strong)
-    
-    # Version 3: Otsu's thresholding (good for bimodal images)
-    _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    preprocessed_images.append(otsu)
-    
-    # Version 4: Noise reduction and edge enhancement
-    # First denoise
-    denoised = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
-    # Then threshold
-    _, denoise_thresh = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    preprocessed_images.append(denoise_thresh)
-    
-    # Version 5: Special table structure processing for line items
-    # Apply erosion followed by dilation to enhance table structures
+    # Apply simple morphological operations to clean up noise and enhance text
     kernel = np.ones((2, 2), np.uint8)
-    eroded = cv2.erode(binary, kernel, iterations=1)
-    dilated = cv2.dilate(eroded, kernel, iterations=2)
-    preprocessed_images.append(dilated)
+    processed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
     
-    # Apply contrast stretching to all versions
-    enhanced_images = []
-    for img in preprocessed_images:
-        # Normalize to enhance contrast
-        enhanced = cv2.normalize(img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-        enhanced_images.append(enhanced)
-    
-    # Return the most processed version for line item extraction and number recognition
-    # This is the version with table structure enhancement
-    return enhanced_images[4]
+    # Return processed image - optimized for balance of quality and speed
+    return processed
 
 def extract_text(preprocessed_image):
     """
-    Enhanced text extraction using Tesseract with multiple configurations
-    and intelligent text combination for better accuracy
+    Optimized text extraction using Tesseract with efficient processing
     """
     try:
-        # Try multiple OCR approaches and configurations for better results
-        ocr_results = []
+        # Use only 2 most effective OCR configurations instead of 4 to improve performance
+        # while maintaining quality
         
-        # Configuration 1: Standard with layout analysis (good for structured documents)
-        config_standard = r'--oem 3 --psm 6 -l eng --dpi 300'
-        text_standard = pytesseract.image_to_string(preprocessed_image, config=config_standard)
-        ocr_results.append(text_standard)
+        # Use a timeout mechanism to prevent hanging on complex images
+        import signal
         
-        # Configuration 2: Single column variable height (better for mixed content)
-        config_single_column = r'--oem 3 --psm 4 -l eng --dpi 300'
-        text_single_column = pytesseract.image_to_string(preprocessed_image, config=config_single_column)
-        ocr_results.append(text_single_column)
-        
-        # Configuration 3: Sparse text (find text anywhere, good for tables and headers)
-        config_sparse = r'--oem 3 --psm 11 -l eng --dpi 300'
-        text_sparse = pytesseract.image_to_string(preprocessed_image, config=config_sparse)
-        ocr_results.append(text_sparse)
-        
-        # Configuration 4: Special for numbers (better for detecting prices and quantities)
-        config_digits = r'--oem 3 --psm 7 -l eng --dpi 300 -c tessedit_char_whitelist="0123456789.,ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "'
-        text_digits = pytesseract.image_to_string(preprocessed_image, config=config_digits)
-        ocr_results.append(text_digits)
-        
-        # Combine results intelligently (more sophisticated than just concatenation)
-        # Start with the standard text as our base
-        combined_text = text_standard
-        
-        # Define key patterns to look for in invoices
-        key_patterns = {
-            'invoice_number': [r'invoice\s*(?:#|number|no[.:]?)\s*([A-Za-z0-9-]+)', 
-                              r'IN(\d+)EDL(\d+)'],
-            'date': [r'date\s*:\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})', 
-                    r'date\s*:\s*(\d{1,2}\s+[A-Za-z]+\s+\d{2,4})'],
-            'customer': [r'customer\s*(?:name|ref)[.:]?\s*(.+?)(?=\n|address)', 
-                        r'customer[.:]?\s*([A-Za-z0-9\s&\-,.]+)'],
-            'vat': [r'vat\s*(?:reg|registration)\s*(?:no|number)[.:]?\s*([A-Za-z0-9]+)',
-                   r'vat\s*@\s*\d+%\s*(\d+(?:,\d+)*(?:\.\d+)?)'],
-            'product_codes': [r'(?:\d{8}\s+\d+\.\d+)', r'(?:[A-Z0-9]{6,}\s+\d+\.\d+)'],
-            'totals': [r'total\s*\((?:rs|inr)\)\s*(\d+(?:,\d+)*(?:\.\d+)?)', 
-                      r'grand\s*total\s*(\d+(?:,\d+)*(?:\.\d+)?)']
-        }
-        
-        # For each pattern, look in all OCR results and enhance the combined text
-        for pattern_type, patterns in key_patterns.items():
-            pattern_found = False
+        class TimeoutException(Exception):
+            pass
             
-            # Check if the pattern already exists in the combined text
-            for pattern in patterns:
-                if re.search(pattern, combined_text, re.IGNORECASE):
-                    pattern_found = True
-                    break
+        def timeout_handler(signum, frame):
+            raise TimeoutException("OCR processing timed out")
             
-            # If not found, look in other OCR results
-            if not pattern_found:
-                for result in ocr_results:
-                    for pattern in patterns:
-                        if re.search(pattern, result, re.IGNORECASE):
-                            # Extract the relevant section and add it to combined text
-                            match = re.search(pattern, result, re.IGNORECASE)
-                            if match:
-                                # Extract context around the match (2 lines before and after)
-                                lines = result.split('\n')
-                                for i, line in enumerate(lines):
-                                    if pattern in line.lower() or pattern_type in line.lower():
-                                        start_idx = max(0, i - 2)
-                                        end_idx = min(len(lines), i + 3)
-                                        context = '\n'.join(lines[start_idx:end_idx])
-                                        if context not in combined_text:
-                                            combined_text += '\n' + context
-                                        pattern_found = True
-                                        break
-                    if pattern_found:
-                        break
+        # Set a timeout for OCR operations
+        signal.signal(signal.SIGALRM, timeout_handler)
         
-        # Final clean-up: remove duplicate lines and excess whitespace
-        lines = combined_text.split('\n')
-        unique_lines = []
-        for line in lines:
-            clean_line = line.strip()
-            if clean_line and clean_line not in unique_lines:
-                unique_lines.append(clean_line)
+        # Configuration 1: Optimized configuration for invoice processing
+        # Use fast mode (--oem 1) instead of more advanced neural net mode for better performance
+        config_optimized = r'--oem 1 --psm 6 -l eng --dpi 300'
         
-        combined_text = '\n'.join(unique_lines)
+        # Initialize with empty string to avoid unbound reference
+        text_primary = ""
+        
+        logger.info("Starting primary OCR extraction")
+        signal.alarm(20)  # Set 20 second timeout for primary extraction
+        try:
+            text_primary = pytesseract.image_to_string(preprocessed_image, config=config_optimized)
+            signal.alarm(0)  # Cancel alarm if successful
+        except TimeoutException:
+            logger.warning("Primary OCR timed out, using simplified configuration")
+            # If timeout, try with even faster config
+            signal.alarm(10)
+            text_primary = pytesseract.image_to_string(preprocessed_image, config=r'--oem 0 --psm 6')
+            signal.alarm(0)
+        
+        # Most invoice data should be found in the primary extraction
+        # But run a second extraction method only for specific areas that might need it
+        
+        # Configuration 2: Add a specialized configuration for tables and numbers
+        config_specialized = r'--oem 1 --psm 4 -l eng'
+        
+        # Initialize text_secondary with default empty string
+        text_secondary = ""
+        
+        # Only process with second configuration if first one gave reasonable results
+        if len(text_primary) > 100:  # If first extraction gave decent amount of text
+            signal.alarm(10)  # Set 10 second timeout for secondary extraction
+            try:
+                text_secondary = pytesseract.image_to_string(preprocessed_image, config=config_specialized)
+                signal.alarm(0)  # Cancel alarm if successful
+            except TimeoutException:
+                logger.warning("Secondary OCR timed out, using only primary results")
+                text_secondary = ""
+                signal.alarm(0)
+        else:
+            # If primary extraction failed, try a different approach
+            signal.alarm(15)
+            try:
+                text_secondary = pytesseract.image_to_string(preprocessed_image, config=r'--oem 0 --psm 11')
+                signal.alarm(0)
+            except TimeoutException:
+                logger.warning("Fallback OCR timed out, using only partial results")
+                text_secondary = ""
+                signal.alarm(0)
+        
+        # Simple combination strategy - focus on performance
+        combined_text = text_primary
+        
+        # Add any unique lines from secondary text
+        primary_lines = set(line.strip() for line in text_primary.split('\n') if line.strip())
+        for line in text_secondary.split('\n'):
+            line = line.strip()
+            if line and line not in primary_lines:
+                combined_text += '\n' + line
+                primary_lines.add(line)
+        
+        # Basic cleanup without complex processing
+        combined_text = re.sub(r'\n{3,}', '\n\n', combined_text)  # Remove excess newlines
         
         return combined_text
     except Exception as e:
         logger.error(f"Error in OCR text extraction: {str(e)}")
-        raise
+        # Return empty string as fallback
+        return ""
 
 def extract_table_data(image_path):
     """
-    Enhanced table extraction using computer vision techniques with more robust error handling
+    Optimized table extraction with performance improvements and timeouts
     """
     try:
         # Read the original image
@@ -193,123 +171,159 @@ def extract_table_data(image_path):
             logger.error(f"Could not read image from {image_path}")
             return []
             
-        original_img = img.copy()
+        # Resize large images for better performance
+        max_dimension = 2000
+        height, width = img.shape[:2]
+        if height > max_dimension or width > max_dimension:
+            scale = max_dimension / max(height, width)
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            logger.info(f"Resized image for table extraction from {width}x{height} to {new_width}x{new_height}")
+        
+        # Set up timeout handling
+        import signal
+        
+        class TimeoutException(Exception):
+            pass
+            
+        def timeout_handler(signum, frame):
+            raise TimeoutException("Table extraction processing timed out")
         
         # Convert to grayscale
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         
         table_data_list = []
         
-        # Method 1: Try to use line-based extraction from direct OCR
+        # Method 1: Optimized line-based extraction - the simplest and fastest approach
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(15)  # Set 15 second timeout
+        
         try:
-            # Process the full image as text first - simpler and less prone to errors
-            # Use a more reliable configuration
-            simple_config = r'--oem 3 --psm 4'  # Assume single column of text
+            # Use a faster OCR engine configuration
+            simple_config = r'--oem 1 --psm 6'
             full_text = pytesseract.image_to_string(gray, config=simple_config)
+            signal.alarm(0)  # Cancel alarm if successful
             
-            # Extract lines that look like table rows
+            # Extract lines that look like table rows - using efficient processing
             lines = full_text.strip().split('\n')
             for line in lines:
                 clean_line = line.strip()
                 # Only consider lines that have numbers and enough content to be a table row
                 if clean_line and len(clean_line) > 10 and any(char.isdigit() for char in clean_line):
                     # Check if line starts with what looks like a product code
-                    if re.match(r'^\d{5,}', clean_line) or re.match(r'^[A-Z0-9]{6,}', clean_line):
+                    # More efficient regex with limited backtracking
+                    if (re.match(r'^\d{5,}(?!\d)', clean_line) or 
+                        re.match(r'^[A-Z0-9]{6,}(?![A-Z0-9])', clean_line)):
                         row_dict = {'text': clean_line}
                         table_data_list.append(row_dict)
+        except TimeoutException:
+            logger.warning("Simple OCR timed out, trying fallback approach")
+            signal.alarm(0)  # Reset alarm
         except Exception as e:
             logger.warning(f"Simple OCR extraction failed: {str(e)}")
+            signal.alarm(0)  # Reset alarm
         
         # If we already have some data, return it
         if len(table_data_list) >= 3:  # If we found at least 3 rows, consider it successful
             logger.info(f"Found {len(table_data_list)} table rows using simple line extraction")
             return table_data_list
-            
-        # Method 2: Try more complex table extraction only if the simple method didn't work well
+        
+        # Only continue if we have few or no results - try a simpler approach for table detection
+        # This is a compromise between effectiveness and performance
+        table_region = None
+        
         try:
-            # Apply preprocessing specifically for table structure detection
-            _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            # Try to find the table by searching for table-like structures in the middle of the image
+            # Most invoices have tables in the middle section
+            height, width = gray.shape
             
-            # Apply morphological operations to identify table structure
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-            dilated = cv2.dilate(thresh, kernel, iterations=1)
+            # Focus on middle 60% of the image where tables are typically located
+            start_y = int(height * 0.2)
+            end_y = int(height * 0.8)
+            middle_section = gray[start_y:end_y, :]
             
-            # Find contours of table-like structures
-            contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # Simple binary thresholding - faster than adaptive thresholding
+            _, thresh = cv2.threshold(middle_section, 150, 255, cv2.THRESH_BINARY_INV)
             
-            # Filter and sort contours by area
-            valid_contours = []
-            for contour in contours:
-                area = cv2.contourArea(contour)
-                if area > 1000:  # Minimum area threshold
-                    valid_contours.append(contour)
+            # Find potential table areas using horizontal line detection
+            # This is much faster than contour analysis for tables
+            horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 1))
+            horizontal_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, horizontal_kernel)
             
-            valid_contours = sorted(valid_contours, key=cv2.contourArea, reverse=True)
-            
-            # Try to identify the main table region
-            table_region = None
-            for contour in valid_contours[:5]:  # Check top 5 contours only
-                x, y, w, h = cv2.boundingRect(contour)
-                # Check if this is likely to be a table (reasonable width and height)
-                if w > 300 and h > 100:
-                    table_region = (x, y, w, h)
-                    break
-            
-            # If we found a table region, extract it and process
-            if table_region:
+            # Find the region with the most horizontal lines - likely to be a table
+            line_density = np.sum(horizontal_lines, axis=1)
+            if np.max(line_density) > 0:
+                dense_line_region = np.argmax(line_density)
+                
+                # Extract a region around the densest line area
+                region_start = max(0, dense_line_region - 100)
+                region_end = min(end_y - start_y, dense_line_region + 200)
+                
+                # Define table region in original image coordinates
+                table_region = (0, start_y + region_start, width, region_end - region_start)
+        except Exception as e:
+            logger.warning(f"Table region detection failed: {str(e)}")
+        
+        # If we found a table region, process it
+        if table_region:
+            try:
                 x, y, w, h = table_region
-                table_img = original_img[y:y+h, x:x+w]
+                table_img = gray[y:y+h, x:x+w]
                 
-                # Apply OCR specifically to the table region
-                custom_config = r'--oem 3 --psm 6'
+                # Set a timeout for this OCR operation
+                signal.alarm(10)
+                
+                # Use a faster OCR configuration
+                custom_config = r'--oem 1 --psm 6'
                 table_text = pytesseract.image_to_string(table_img, config=custom_config)
+                signal.alarm(0)  # Cancel alarm if successful
                 
-                # Process the table text
+                # Process the table text efficiently
                 lines = table_text.strip().split('\n')
-                
-                # Extract rows that look like table data
                 for line in lines:
                     clean_line = line.strip()
                     if clean_line and len(clean_line) > 10 and any(char.isdigit() for char in clean_line):
                         parts = clean_line.split()
-                        # Check if first part looks like a product code
-                        if len(parts) >= 4 and (re.match(r'^\d+', parts[0]) or re.match(r'^[A-Z0-9]{5,}', parts[0])):
+                        # Check if first part looks like a product code with an efficient check
+                        if len(parts) >= 4 and re.match(r'^(\d{5,}|[A-Z0-9]{5,})$', parts[0]):
                             row_dict = {'text': clean_line}
                             table_data_list.append(row_dict)
-        except Exception as e:
-            logger.warning(f"Complex table extraction failed: {str(e)}")
-            
-        # Method 3: Fallback to direct structure detection (only if we still don't have data)
+            except TimeoutException:
+                logger.warning("Table region OCR timed out")
+                signal.alarm(0)  # Reset alarm
+            except Exception as e:
+                logger.warning(f"Table region processing failed: {str(e)}")
+                signal.alarm(0)  # Reset alarm
+        
+        # Simplified fallback - only if we still have no data and if time allows
         if not table_data_list:
             try:
-                # Split the image into horizontal sections and process each
+                # Process just the middle section of the image where table content is likely
                 height, width = gray.shape
-                num_sections = 5
-                section_height = height // num_sections
+                middle_y = height // 2
+                section = gray[middle_y-150:middle_y+150, :]  # Just process middle 300 pixels
                 
-                for i in range(num_sections):
-                    # Define section boundaries
-                    y_start = i * section_height
-                    y_end = (i + 1) * section_height if i < num_sections - 1 else height
-                    
-                    # Extract section
-                    section = gray[y_start:y_end, 0:width]
-                    
-                    # OCR the section
-                    section_config = r'--oem 3 --psm 6'
-                    section_text = pytesseract.image_to_string(section, config=section_config)
-                    
-                    # Process lines from this section
-                    section_lines = section_text.strip().split('\n')
-                    for line in section_lines:
-                        clean_line = line.strip()
-                        if clean_line and len(clean_line) > 10 and any(char.isdigit() for char in clean_line):
-                            parts = re.split(r'\s+', clean_line)
-                            if len(parts) >= 4:
-                                row_dict = {'text': clean_line}
-                                table_data_list.append(row_dict)
+                # Quick timeout
+                signal.alarm(8)
+                
+                # Fast OCR configuration
+                section_config = r'--oem 0 --psm 6'  # Fastest engine
+                section_text = pytesseract.image_to_string(section, config=section_config)
+                signal.alarm(0)  # Cancel alarm
+                
+                # Process lines from this section
+                section_lines = section_text.strip().split('\n')
+                for line in section_lines:
+                    clean_line = line.strip()
+                    if clean_line and len(clean_line) > 10 and any(char.isdigit() for char in clean_line):
+                        # Quick check for product code pattern
+                        if re.search(r'\d{5,}|\b[A-Z0-9]{6,}\b', clean_line):
+                            row_dict = {'text': clean_line}
+                            table_data_list.append(row_dict)
             except Exception as e:
-                logger.warning(f"Sectional extraction failed: {str(e)}")
+                logger.warning(f"Fallback extraction failed: {str(e)}")
+                signal.alarm(0)  # Reset alarm just in case
         
         return table_data_list
     
@@ -543,31 +557,45 @@ def apply_specific_rules(invoice_data, text):
     """
     Apply specific rules for known invoice formats
     """
-    # Check if it's a Edendale Distributors invoice
-    if 'Edendale' in text or 'EDENDALE' in text:
+    # Apply rules based on the detected invoice type
+    if invoice_data['invoice_type'] == 'edendale':
         logger.info("Applying specialized Edendale invoice processing")
-        # Special processing for Edendale invoices
-        # Based on the sample invoice in the image
+        # Special processing for Edendale invoices based on sample invoice
         
-        # Extract invoice number format IN1234EDL5678
+        # Extract invoice number - Enhanced for Edendale format based on sample
         invoice_number_patterns = [
+            r'Invoice\s*No\.?:?\s*(\d+EDL\d+)',
             r'IN(\d+)EDL(\d+)',
             r'Customer Code:\s*(\w+)',
-            r'Invoice No:\s*(\w+)'
+            r'Invoice No:\s*(\d+EDL\d+)'
         ]
         
         for pattern in invoice_number_patterns:
             invoice_match = re.search(pattern, text)
             if invoice_match:
-                if 'IN' in pattern:
+                if 'IN(' in pattern:
                     invoice_data['header']['invoice_number'] = f"IN{invoice_match.group(1)}EDL{invoice_match.group(2)}"
                 else:
                     invoice_data['header']['invoice_number'] = invoice_match.group(1).strip()
                 break
         
+        # Extract date - Enhanced for Edendale format
+        date_patterns = [
+            r'Date:?\s*(\d{1,2}/\d{1,2}/\d{2,4})',
+            r'Date:?\s*(\d{1,2}-\d{1,2}-\d{2,4})',
+            r'Date:?\s*(\d{1,2}\.\d{1,2}\.\d{2,4})'
+        ]
+        
+        for pattern in date_patterns:
+            date_match = re.search(pattern, text)
+            if date_match:
+                invoice_data['header']['date'] = date_match.group(1).strip()
+                break
+        
         # Extract VAT and Business registration numbers with more specific patterns
         vat_reg_patterns = [
             r'VAT Reg No\.?:?\s*([A-Za-z0-9]+)',
+            r'Vat Reg No\.?:?\s*([A-Za-z0-9]+)',
             r'VAT Reg No\.?:?\s*(\d+)'
         ]
         
@@ -580,6 +608,7 @@ def apply_specific_rules(invoice_data, text):
         # Extract business registration number
         business_reg_patterns = [
             r'Business Reg No\.?:?\s*([A-Za-z0-9]+)',
+            r'Business Reg No\.?:?\s*([C0-9]+)',
             r'Business Reg No\.?:?\s*(\d+)'
         ]
         
@@ -589,15 +618,17 @@ def apply_specific_rules(invoice_data, text):
                 invoice_data['header']['business_reg_no'] = business_match.group(1).strip()
                 break
         
-        # Extract line items - using known product code formats for Edendale invoices
-        # Multiple patterns for different possible OCR interpretations
+        # Extract line items - using known product code formats from sample Edendale invoice
+        # Multiple patterns for different possible OCR interpretations of the 9-digit product codes
         product_code_patterns = [
-            # Pattern for correct recognition
-            r'(5\d{7}|8\d{7}|9\d{7})\s+(\d+(?:\.\d+)?)\s+([A-Za-z0-9\s&\-.,]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:,\d+)*(?:\.\d+)?)',
-            # Pattern for when OCR might merge numbers
-            r'(5\d{7}|8\d{7}|9\d{7})\s+(\d+)\s+([A-Za-z0-9\s&\-.,]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+)',
-            # Pattern for possible OCR errors in product codes
-            r'(5\d{5,7}|8\d{5,7}|9\d{5,7})\s+(\d+(?:\.\d+)?)\s+([A-Za-z0-9\s&\-.,]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:,\d+)*(?:\.\d+)?)'
+            # Standard pattern from sample invoice (9-digit product code starting with 5 or 8)
+            r'(5\d{8}|8\d{8}|9\d{8})\s+(\d+(?:\.\d+)?(?:\([^)]+\))?)\s+([A-Za-z0-9\s&\-.,]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:,\d+)*(?:\.\d+)?)',
+            
+            # For OCR that might misinterpret some digits
+            r'(5\d{7,8}|8\d{7,8}|9\d{7,8})\s+(\d+(?:\.\d+)?(?:\([^)]+\))?)\s+([A-Za-z0-9\s&\-.,]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:,\d+)*(?:\.\d+)?)',
+            
+            # For cases where quantity might contain additional text like "(C48P)"
+            r'(5\d{7,8}|8\d{7,8}|9\d{7,8})\s+(\d+[^\s]*)\s+([A-Za-z0-9\s&\-.,]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:,\d+)*(?:\.\d+)?)'
         ]
         
         edendale_items = []
@@ -606,13 +637,24 @@ def apply_specific_rules(invoice_data, text):
             product_code_lines = re.findall(pattern, text)
             if product_code_lines:
                 for line in product_code_lines:
+                    # Extract just numeric part from quantity - handle cases like "24.00(C24P)"
+                    quantity_match = re.search(r'(\d+(?:\.\d+)?)', line[1])
+                    quantity = quantity_match.group(1) if quantity_match else "1"
+                    
+                    # Clean unit price and discount of non-numeric characters except decimal
+                    unit_price = re.sub(r'[^\d.]', '', line[3]) 
+                    discount = re.sub(r'[^\d.]', '', line[4])
+                    
+                    # Clean total of any non-numeric characters except decimal
+                    total = re.sub(r'[^\d.]', '', line[5])
+                    
                     item = {
                         'product_code': line[0].strip(),
-                        'quantity': line[1].strip(),
+                        'quantity': quantity,
                         'description': line[2].strip(),
-                        'unit_price': line[3].strip(),
-                        'discount': line[4].strip(),
-                        'total': line[5].strip().replace(',', '')
+                        'unit_price': unit_price,
+                        'discount': discount,
+                        'total': total
                     }
                     edendale_items.append(item)
         
@@ -621,44 +663,51 @@ def apply_specific_rules(invoice_data, text):
             logger.info(f"Found {len(edendale_items)} line items using Edendale-specific patterns")
             invoice_data['line_items'] = edendale_items
                 
-        # Enhanced extraction for totals in Edendale format
-        # Extract Total
+        # Enhanced extraction for totals in Edendale format based on sample invoice
+        # Extract Total from the specific patterns on the Edendale invoice
         total_patterns = [
-            r'Total \(Rs\)\s*(\d+(?:,\d+)*(?:\.\d+)?)',
-            r'Total\s*\(Rs\)\s*(\d+(?:,\d+)*(?:\.\d+)?)',
-            r'Total\s*(\d+(?:,\d+)*(?:\.\d+)?)'
+            r'Total\s*\(Rs\)\s*(?:Rs\.?)?\s*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)',
+            r'Total\s*(?:\(Rs\))?\s*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)',
+            r'Total[\s:]*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)',
+            r'Total\s*Amount\s*(?:\(Rs\))?\s*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)'
         ]
         
         for pattern in total_patterns:
             total_match = re.search(pattern, text)
             if total_match:
-                invoice_data['totals']['subtotal'] = total_match.group(1).replace(',', '')
+                # Clean value of any non-numeric chars except decimal point
+                total_value = re.sub(r'[^\d.]', '', total_match.group(1))
+                invoice_data['totals']['subtotal'] = total_value
                 break
         
-        # Extract VAT
+        # Extract VAT from the specific format seen in the sample invoice
         vat_patterns = [
-            r'VAT\s*@\s*\d+%\s*(\d+(?:,\d+)*(?:\.\d+)?)',
-            r'VAT\s*@\s*(\d+(?:,\d+)*(?:\.\d+)?)',
-            r'VAT\s*(\d+(?:,\d+)*(?:\.\d+)?)'
+            r'VAT\s*@\s*\d+%\s*(?:Rs\.?)?\s*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)',
+            r'VAT\s*(?:@\s*\d+%)?\s*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)',
+            r'VAT[\s:]*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)'
         ]
         
         for pattern in vat_patterns:
             vat_match = re.search(pattern, text)
             if vat_match:
-                invoice_data['totals']['vat'] = vat_match.group(1).replace(',', '')
+                # Clean value of any non-numeric chars except decimal point
+                vat_value = re.sub(r'[^\d.]', '', vat_match.group(1))
+                invoice_data['totals']['vat'] = vat_value
                 break
         
-        # Extract Grand Total
+        # Extract Grand Total from the specific format seen in the sample invoice
         grand_total_patterns = [
-            r'GRAND TOTAL\s*(\d+(?:,\d+)*(?:\.\d+)?)',
-            r'Grand Total\s*(\d+(?:,\d+)*(?:\.\d+)?)',
-            r'GRAND\s*TOTAL\s*(\d+(?:,\d+)*(?:\.\d+)?)'
+            r'GRAND\s*TOTAL\s*(?:Rs\.?)?\s*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)',
+            r'(?:GRAND|Grand)\s*Total\s*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)',
+            r'GRAND\s*TOTAL[\s:]*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)'
         ]
         
         for pattern in grand_total_patterns:
             grand_total_match = re.search(pattern, text)
             if grand_total_match:
-                invoice_data['totals']['grand_total'] = grand_total_match.group(1).replace(',', '')
+                # Clean value of any non-numeric chars except decimal point
+                grand_total_value = re.sub(r'[^\d.]', '', grand_total_match.group(1))
+                invoice_data['totals']['grand_total'] = grand_total_value
                 break
 
     return invoice_data
@@ -666,153 +715,183 @@ def apply_specific_rules(invoice_data, text):
 def process_image(image_path):
     """
     Main function to process the invoice image and extract all required data
+    Includes optimizations for performance and timeout handling
     """
     logger.info(f"Starting processing of image: {image_path}")
+    
+    # Initialize with empty/default values
+    default_invoice_data = {
+        'header': {
+            'invoice_number': '',
+            'date': '',
+            'customer_name': '',
+            'customer_ref': '',
+            'vat_reg_no': '',
+            'business_reg_no': ''
+        },
+        'line_items': [],
+        'totals': {
+            'subtotal': '0',
+            'vat': '0',
+            'grand_total': '0'
+        },
+        'invoice_type': 'unknown'
+    }
+    
+    # Setup timeout handling
+    import signal
+    
+    class TimeoutException(Exception):
+        pass
+        
+    def timeout_handler(signum, frame):
+        raise TimeoutException("Image processing timed out")
+    
+    # Set signal handler
+    signal.signal(signal.SIGALRM, timeout_handler)
     
     try:
         # Check if file exists
         if not os.path.exists(image_path):
-            raise FileNotFoundError(f"Image file not found: {image_path}")
+            logger.error(f"Image file not found: {image_path}")
+            return default_invoice_data
         
-        # Preprocess the image
-        logger.info("Preprocessing the image for improved OCR accuracy")
-        preprocessed_image = preprocess_image(image_path)
+        # Set 30 second timeout for entire extraction process
+        signal.alarm(30)
         
-        # Extract text using OCR with improved settings
-        logger.info("Extracting text from preprocessed image")
-        text = extract_text(preprocessed_image)
-        logger.debug(f"Extracted text: {text[:200]}...")  # Log first 200 chars of extracted text
-        
-        # First try to detect the invoice type for better specialized extraction
-        invoice_type = 'unknown'
-        # Check for Edendale invoice with multiple patterns
-        edendale_patterns = [
-            'Edendale Distributors',
-            'Edendale',
-            'EDENDALE',
-            # Product code patterns specific to Edendale
-            r'5\d{7}|8\d{7}|9\d{7}',
-            # Check for their format of VAT registration
-            'VAT Reg No.: VAT20362266',
-            # Check for typical text in their invoices
-            'CREDIT SALES',
-            # Check for receipt statement
-            'Credit Sales not settled within 1 month from invoice date will bear interest at 2%'
-        ]
-        
-        for pattern in edendale_patterns:
-            if pattern in text or re.search(pattern, text):
-                invoice_type = 'edendale'
-                logger.info(f"Detected Edendale Distributors invoice format using pattern: {pattern[:20]}")
-                break
-        # Add more invoice type detections as needed
-        
-        # Parse different sections of the invoice
-        logger.info("Parsing invoice header information")
-        header = parse_invoice_header(text)
-        
-        # Get table data using computer vision techniques for better line item detection
-        logger.info("Extracting table data using specialized table detection")
-        table_data = extract_table_data(image_path)
-        logger.debug(f"Extracted {len(table_data)} table elements")
-        
-        # Use table data to improve line item extraction when available
-        # We'll combine results from both approaches for better accuracy
-        
-        # Parse line items from text
-        logger.info("Parsing line items from extracted text")
-        line_items = parse_line_items(text)
-        
-        # If table data extraction provided useful information but text extraction didn't find line items
-        if table_data and (not line_items or len(line_items) < 2):
-            logger.info("Using table data to improve line item detection")
+        try:
+            # Preprocess the image - more efficient version
+            logger.info("Preprocessing the image for improved OCR accuracy")
+            preprocessed_image = preprocess_image(image_path)
             
-            # Process each row from table data
-            table_items = []
-            for row in table_data:
-                if 'text' in row and row['text'].strip():
-                    # Clean up the text
-                    clean_text = re.sub(r'\s+', ' ', row['text']).strip()
-                    
-                    # Try to detect if this is a line item using patterns
-                    if (re.match(r'^\d+', clean_text) or 
-                        re.match(r'^[A-Z0-9]{6,}', clean_text)):
-                        
-                        # Split by spaces and try to extract components
-                        parts = clean_text.split(' ')
-                        if len(parts) >= 4:  # Need at least 4 parts for a valid item
-                            try:
-                                # Extract using position-based approach
-                                product_code = parts[0]
-                                
-                                # Check if second part is a number (quantity)
-                                if re.match(r'^\d+(?:\.\d+)?$', parts[1]):
-                                    quantity = parts[1]
-                                    desc_start = 2
-                                else:
-                                    quantity = '1'  # Default quantity
-                                    desc_start = 1
-                                
-                                # Last part is usually total
-                                total = parts[-1].replace(',', '')
-                                
-                                # Try to find unit price and discount, typically near end
-                                if len(parts) >= desc_start + 3:
-                                    unit_price = parts[-3]
-                                    discount = parts[-2]
-                                    desc_end = -3
-                                else:
-                                    unit_price = parts[-2] if len(parts) >= desc_start + 2 else '0'
-                                    discount = '0'
-                                    desc_end = -2 if len(parts) >= desc_start + 2 else -1
-                                
-                                # Description is everything between
-                                description = ' '.join(parts[desc_start:desc_end])
-                                
-                                table_items.append({
-                                    'product_code': product_code,
-                                    'quantity': quantity,
-                                    'description': description,
-                                    'unit_price': unit_price,
-                                    'discount': discount,
-                                    'total': total
-                                })
-                            except Exception as e:
-                                logger.warning(f"Error processing table row: {clean_text} - {str(e)}")
+            # Extract text using OCR with optimized settings
+            logger.info("Extracting text from preprocessed image")
+            text = extract_text(preprocessed_image)
+            logger.debug(f"Extracted text length: {len(text)} characters")
             
-            # If we found items from table data and they look better than text extraction
-            if table_items and (not line_items or len(table_items) > len(line_items)):
-                line_items = table_items
-                logger.info(f"Using {len(table_items)} items extracted from table data")
-        
-        # Parse totals from the text
-        logger.info("Extracting invoice total information")
-        totals = parse_totals(text)
-        
-        # Combine all data
-        invoice_data = {
-            'header': header,
-            'line_items': line_items,
-            'totals': totals,
-            'invoice_type': invoice_type
-        }
-        
-        # Apply specific rules for known invoice formats for final cleanup
-        logger.info(f"Applying specialized rules for invoice type: {invoice_type}")
-        invoice_data = apply_specific_rules(invoice_data, text)
-        
-        # Post-processing validation and cleanup
-        # Ensure all numeric fields are properly formatted
-        for item in invoice_data['line_items']:
-            for field in ['quantity', 'unit_price', 'discount', 'total']:
-                # Clean any non-numeric characters except decimal point
-                if item[field]:
-                    item[field] = re.sub(r'[^\d.]', '', item[field])
-        
-        logger.info(f"Successfully processed image and extracted {len(invoice_data['line_items'])} line items")
-        
-        return invoice_data
-        
+            # Turn off alarm after potentially long operations
+            signal.alarm(0)
+            
+            # Quick check for empty text
+            if not text or len(text.strip()) < 20:
+                logger.warning("Extracted text is too short - OCR may have failed")
+                return default_invoice_data
+                
+            # First try to detect the invoice type for better specialized extraction
+            invoice_type = 'unknown'
+            
+            # Check for Edendale invoice with targeted patterns (performance optimized)
+            for pattern in ['Edendale', 'EDENDALE', 'CREDIT SALES', r'5\d{7}|8\d{7}|9\d{7}']:
+                if pattern in text or re.search(pattern, text):
+                    invoice_type = 'edendale'
+                    logger.info(f"Detected Edendale invoice format using pattern: {pattern[:20]}")
+                    break
+            
+            # Parse header (quick operation)
+            logger.info("Parsing invoice header information")
+            header = parse_invoice_header(text)
+            
+            # Get table data with optimized table detection (with internal timeouts)
+            logger.info("Extracting table data using optimized table detection")
+            table_data = extract_table_data(image_path)
+            logger.debug(f"Extracted {len(table_data)} table elements")
+            
+            # Parse line items with timeout protection
+            signal.alarm(10)  # Set shorter timeout for potentially intensive regex operations
+            try:
+                logger.info("Parsing line items from extracted text")
+                line_items = parse_line_items(text)
+                signal.alarm(0)  # Cancel alarm
+            except TimeoutException:
+                logger.warning("Line item parsing timed out")
+                line_items = []  # Default to empty if timed out
+                signal.alarm(0)  # Make sure alarm is canceled
+            
+            # Process table data for line items if text extraction didn't produce results
+            # Optimized to be more efficient
+            if table_data and (not line_items or len(line_items) < 2):
+                logger.info("Using table data to improve line item detection")
+                
+                table_items = []
+                for row in table_data:
+                    if 'text' in row and row['text'].strip():
+                        try:
+                            # Clean up the text
+                            clean_text = re.sub(r'\s+', ' ', row['text']).strip()
+                            
+                            # Quick check if this is a line item
+                            if (re.match(r'^\d+', clean_text) or re.match(r'^[A-Z0-9]{5,}', clean_text)):
+                                parts = clean_text.split(' ')
+                                if len(parts) >= 4:
+                                    # Extract components (simplified for performance)
+                                    product_code = parts[0]
+                                    quantity = parts[1] if re.match(r'^\d+(?:\.\d+)?$', parts[1]) else '1'
+                                    total = parts[-1].replace(',', '')
+                                    
+                                    if len(parts) >= 5:
+                                        unit_price = parts[-2]
+                                        description = ' '.join(parts[2:-2])
+                                        discount = '0'  # Default to zero discount for simplicity
+                                    else:
+                                        unit_price = '0'
+                                        description = ' '.join(parts[2:-1])
+                                        discount = '0'
+                                    
+                                    table_items.append({
+                                        'product_code': product_code,
+                                        'quantity': quantity,
+                                        'description': description,
+                                        'unit_price': unit_price,
+                                        'discount': discount,
+                                        'total': total
+                                    })
+                        except Exception as e:
+                            logger.warning(f"Error processing table row: {str(e)}")
+                            continue  # Skip problematic rows and continue
+                
+                # Use table items if they're better than text extraction
+                if table_items and (not line_items or len(table_items) > len(line_items)):
+                    line_items = table_items
+                    logger.info(f"Using {len(table_items)} items from table data")
+            
+            # Parse totals (quick operation)
+            logger.info("Extracting invoice total information")
+            totals = parse_totals(text)
+            
+            # Combine all data
+            invoice_data = {
+                'header': header,
+                'line_items': line_items,
+                'totals': totals,
+                'invoice_type': invoice_type
+            }
+            
+            # Apply specific rules based on invoice type
+            invoice_data = apply_specific_rules(invoice_data, text)
+            
+            # Post-processing - sanitize all numeric fields
+            for item in invoice_data['line_items']:
+                for field in ['quantity', 'unit_price', 'discount', 'total']:
+                    if item[field]:
+                        item[field] = re.sub(r'[^\d.]', '', item[field])
+                        # Provide defaults for empty values after cleaning
+                        if not item[field]:
+                            item[field] = '0'
+            
+            # Also clean totals to ensure they're valid
+            for key in invoice_data['totals']:
+                if not invoice_data['totals'][key] or not re.match(r'^\d+\.?\d*$', invoice_data['totals'][key]):
+                    invoice_data['totals'][key] = '0'
+            
+            logger.info(f"Successfully processed image and extracted {len(invoice_data['line_items'])} line items")
+            return invoice_data
+            
+        except TimeoutException:
+            logger.error("Processing timed out, returning default data")
+            signal.alarm(0)  # Reset the alarm
+            return default_invoice_data
+            
     except Exception as e:
         logger.error(f"Error processing image: {str(e)}")
-        raise
+        # Return default data instead of raising exception to avoid server errors
+        return default_invoice_data
