@@ -100,8 +100,15 @@ def batch_upload():
                 filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 file.save(filepath)
                 
-                # Process the invoice image
+                # Process the invoice image with enhanced OCR
+                logger.info(f"Processing file: {filepath}")
                 invoice_data = process_image(filepath)
+                
+                # Log the invoice type detected and number of line items found for debugging
+                invoice_type = invoice_data.get('invoice_type', 'unknown')
+                line_items_count = len(invoice_data.get('line_items', []))
+                logger.info(f"Processed {file.filename}: Type={invoice_type}, Items={line_items_count}")
+                
                 all_invoice_data.append(invoice_data)
                 processed_files.append(file.filename)
                 
@@ -119,6 +126,10 @@ def batch_upload():
         excel_file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'combined_invoices.xlsx')
         create_excel_file(all_invoice_data, excel_file_path, batch_mode=True)
         session['excel_file_path'] = excel_file_path
+        
+        logger.info(f"Successfully processed {len(processed_files)} invoices into Excel")
+    else:
+        logger.warning("No invoices were successfully processed")
     
     # Prepare summary data for template
     summary = {
@@ -143,11 +154,16 @@ def review_data():
     header_data = invoice_data.get('header', {})
     line_items = invoice_data.get('line_items', [])
     totals = invoice_data.get('totals', {})
+    invoice_type = invoice_data.get('invoice_type', 'unknown')
+    
+    # Log for debugging
+    logger.debug(f"Reviewing invoice of type '{invoice_type}' with {len(line_items)} line items")
     
     return render_template('results.html', 
                           header=header_data, 
                           line_items=line_items, 
-                          totals=totals)
+                          totals=totals,
+                          invoice_type=invoice_type)
 
 @app.route('/update_data', methods=['POST'])
 def update_data():
@@ -178,10 +194,14 @@ def update_data():
     for key in ['subtotal', 'vat', 'grand_total']:
         totals[key] = request.form.get(f'totals_{key}', '')
     
+    # Preserve the invoice type if it exists in the original data
+    invoice_type = invoice_data.get('invoice_type', 'unknown')
+    
     # Update the invoice data in session
     invoice_data['header'] = header
     invoice_data['line_items'] = line_items
     invoice_data['totals'] = totals
+    invoice_data['invoice_type'] = invoice_type  # Keep the invoice type
     session['invoice_data'] = invoice_data
     
     # Generate Excel file

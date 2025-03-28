@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.hdf5
     pkgs.tesseract
     pkgs.libGLU
     pkgs.libGL
