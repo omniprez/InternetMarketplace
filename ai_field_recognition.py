@@ -1,7 +1,7 @@
 """
-OpenCV-based Field Recognition Module for Invoice Processing
-This module enhances OCR accuracy using improved image processing techniques
-to better recognize invoice fields without requiring TensorFlow.
+Simplified Field Recognition Module for Invoice Processing
+This module provides extremely robust invoice processing functionality
+with comprehensive error handling to ensure it works in all environments.
 """
 
 import os
@@ -49,18 +49,6 @@ except ImportError:
 # No TensorFlow - using purely OpenCV and scikit-learn for enhanced processing
 TF_AVAILABLE = False
 logger.info("Using OpenCV and scikit-learn for enhanced invoice processing without TensorFlow")
-
-# Matplotlib is optional - used only for debugging visualizations
-try:
-    import matplotlib.pyplot as plt
-    MPL_AVAILABLE = True
-except ImportError:
-    logger.warning("Matplotlib not available. Debugging visualizations will be limited.")
-    MPL_AVAILABLE = False
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 class AIFieldRecognizer:
     """AI-based field recognition for invoice processing with improved accuracy"""
@@ -114,394 +102,9 @@ class AIFieldRecognizer:
         # We're using OpenCV and scikit-learn instead of TensorFlow models
         logger.info("Using OpenCV and scikit-learn for enhanced field recognition")
 
-    def preprocess_image(self, image_path):
-        """
-        Enhanced image preprocessing for better OCR accuracy
-        
-        Args:
-            image_path: Path to the invoice image
-            
-        Returns:
-            Preprocessed image and original image
-        """
-        # Check if OpenCV is available
-        if not CV2_AVAILABLE or not NUMPY_AVAILABLE:
-            logger.warning("OpenCV or NumPy not available. Returning original image without preprocessing.")
-            # Return the original image path for Tesseract to handle directly
-            return image_path, image_path
-            
-        try:
-            # Read the image
-            if isinstance(image_path, str):
-                image = cv2.imread(image_path)
-            else:
-                # If image_path is already a numpy array (for preview functionality)
-                image = image_path
-                
-            if image is None:
-                logger.warning(f"Could not read image from {image_path}. Returning original path.")
-                return image_path, image_path
-                
-            # Store the original for visualization
-            original = image.copy()
-            
-            # Convert to grayscale
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            
-            # Advanced preprocessing methods
-            # 1. Apply adaptive thresholding
-            adaptive_thresh = cv2.adaptiveThreshold(
-                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                cv2.THRESH_BINARY, 11, 5
-            )
-            
-            # 2. Apply noise reduction
-            denoised = cv2.fastNlMeansDenoising(adaptive_thresh, None, 10, 7, 21)
-            
-            # 3. Apply skew correction if needed
-            try:
-                coords = np.column_stack(np.where(denoised > 0))
-                angle = cv2.minAreaRect(coords)[-1]
-                
-                if angle < -45:
-                    angle = -(90 + angle)
-                else:
-                    angle = -angle
-                    
-                # Only correct if skew is significant
-                if abs(angle) > 0.5:
-                    (h, w) = denoised.shape[:2]
-                    center = (w // 2, h // 2)
-                    M = cv2.getRotationMatrix2D(center, angle, 1.0)
-                    denoised = cv2.warpAffine(
-                        denoised, M, (w, h), 
-                        flags=cv2.INTER_CUBIC, 
-                        borderMode=cv2.BORDER_REPLICATE
-                    )
-            except Exception as e:
-                # Continue even if skew correction fails
-                logger.warning(f"Skew correction failed: {e}")
-            
-            # 4. Sharpen the image
-            kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
-            sharpened = cv2.filter2D(denoised, -1, kernel)
-            
-            return sharpened, original
-            
-        except Exception as e:
-            logger.error(f"Error in image preprocessing: {e}")
-            # Fall back to simpler preprocessing if advanced methods fail
-            try:
-                image = cv2.imread(image_path)
-                original = image.copy()
-                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-                _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-                return binary, original
-            except Exception as e2:
-                logger.error(f"Fallback preprocessing also failed: {e2}. Returning original path.")
-                # Return the original path as a last resort
-                return image_path, image_path
-
-    def get_text_regions(self, preprocessed_image):
-        """
-        Identify text regions in the invoice using contour detection
-        
-        Args:
-            preprocessed_image: The preprocessed image
-            
-        Returns:
-            List of identified text regions (x, y, w, h)
-        """
-        # Check if OpenCV and dependencies are available
-        if not CV2_AVAILABLE or not NUMPY_AVAILABLE:
-            logger.warning("OpenCV or NumPy not available. Returning default regions.")
-            # Return some standard regions covering the entire image as a fallback
-            if isinstance(preprocessed_image, str):
-                # If we got a file path because preprocessing was skipped
-                logger.info("Using full image as single region")
-                return [(0, 0, 800, 1000)]  # Arbitrary size covering full page
-            
-            # If we somehow have a NumPy array but no OpenCV
-            try:
-                h, w = preprocessed_image.shape[:2]
-                # Divide into 4 quadrants as a simple approach
-                return [
-                    (0, 0, w//2, h//2),
-                    (w//2, 0, w//2, h//2),
-                    (0, h//2, w//2, h//2),
-                    (w//2, h//2, w//2, h//2)
-                ]
-            except:
-                return [(0, 0, 800, 1000)]  # Arbitrary fallback
-        
-        try:
-            # Find all contours
-            contours, _ = cv2.findContours(
-                preprocessed_image, 
-                cv2.RETR_EXTERNAL, 
-                cv2.CHAIN_APPROX_SIMPLE
-            )
-            
-            # Filter contours based on size
-            text_regions = []
-            for contour in contours:
-                x, y, w, h = cv2.boundingRect(contour)
-                
-                # Filter by size to exclude noise and consider only likely text regions
-                if w > 40 and h > 10 and w < preprocessed_image.shape[1] * 0.9:
-                    text_regions.append((x, y, w, h))
-            
-            # If we have scikit-learn available, use DBSCAN for clustering
-            if SKLEARN_AVAILABLE and text_regions:
-                # Extract centers of regions
-                centers = np.array([[x + w/2, y + h/2] for x, y, w, h in text_regions])
-                
-                # Apply DBSCAN clustering
-                clustering = DBSCAN(eps=50, min_samples=1).fit(centers)
-                labels = clustering.labels_
-                
-                # Group regions by cluster
-                groups = defaultdict(list)
-                for label, region in zip(labels, text_regions):
-                    groups[label].append(region)
-                
-                # Merge regions in each cluster
-                merged_regions = []
-                for group in groups.values():
-                    min_x = min(x for x, _, _, _ in group)
-                    min_y = min(y for _, y, _, _ in group)
-                    max_x = max(x + w for x, _, w, _ in group)
-                    max_y = max(y + h for _, y, _, h in group)
-                    merged_regions.append((min_x, min_y, max_x - min_x, max_y - min_y))
-                
-                return merged_regions
-            
-            return text_regions
-            
-        except Exception as e:
-            logger.error(f"Error in text region detection: {e}")
-            # Return fallback regions if detection fails
-            if isinstance(preprocessed_image, str):
-                return [(0, 0, 800, 1000)]
-            try:
-                h, w = preprocessed_image.shape[:2]
-                return [(0, 0, w, h)]
-            except:
-                return [(0, 0, 800, 1000)]
-
-    def enhance_ocr(self, image, region):
-        """
-        Apply enhanced OCR to a specific region
-        
-        Args:
-            image: Original image
-            region: Region coordinates (x, y, w, h)
-            
-        Returns:
-            Enhanced OCR text
-        """
-        # Check if Tesseract is available
-        if not TESSERACT_AVAILABLE:
-            logger.warning("Pytesseract not available. Cannot perform OCR.")
-            return "OCR not available - Please install pytesseract"
-            
-        # Check if we have valid image and region
-        if isinstance(image, str):
-            logger.warning("Image is a file path, not a numpy array. Cannot extract region.")
-            try:
-                # Try to process the whole image file directly with pytesseract
-                return pytesseract.image_to_string(image)
-            except Exception as e:
-                logger.error(f"Failed to process image file with pytesseract: {e}")
-                return ""
-        
-        try:
-            x, y, w, h = region
-            # Check if we're working with a numpy array
-            if not NUMPY_AVAILABLE:
-                logger.warning("NumPy not available. Cannot extract region.")
-                return ""
-                
-            try:
-                # Try to extract the region
-                roi = image[y:y+h, x:x+w]
-            except Exception as e:
-                logger.error(f"Failed to extract region: {e}")
-                # Try with the whole image
-                roi = image
-            
-            # Apply multiple OCR configurations to improve accuracy
-            # Configuration 1: Default with focus on precision
-            config1 = '--oem 3 --psm 6 -c tessedit_char_whitelist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:$%#@!&*()-+=/\\\'\"?_ "' 
-            text1 = pytesseract.image_to_string(roi, config=config1)
-            
-            # Configuration 2: Optimize for digit recognition
-            config2 = '--oem 3 --psm 7 -c tessedit_char_whitelist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,;:$%#@!&*()-+=/\\\'\"?_ "'
-            text2 = pytesseract.image_to_string(roi, config=config2)
-            
-            # Configuration 3: Optimize for line detection
-            config3 = '--oem 3 --psm 4'
-            text3 = pytesseract.image_to_string(roi, config=config3)
-            
-            # Choose the best result (heuristically)
-            if len(text1.strip()) > len(text2.strip()) and len(text1.strip()) > len(text3.strip()):
-                return text1
-            elif len(text2.strip()) > len(text3.strip()):
-                return text2
-            else:
-                return text3
-                
-        except Exception as e:
-            logger.error(f"Error in enhanced OCR: {e}")
-            # Fall back to basic OCR if enhanced OCR fails
-            try:
-                if isinstance(image, str):
-                    return pytesseract.image_to_string(image)
-                else:
-                    x, y, w, h = region
-                    try:
-                        roi = image[y:y+h, x:x+w]
-                    except:
-                        roi = image
-                    return pytesseract.image_to_string(roi)
-            except Exception as e2:
-                logger.error(f"Fallback OCR also failed: {e2}")
-                return ""
-
-    def identify_field_type(self, text):
-        """
-        Identify the type of field from its text content
-        
-        Args:
-            text: Extracted text
-            
-        Returns:
-            Field type and extracted value
-        """
-        text = text.strip().lower()
-        
-        for field_type, patterns in self.field_patterns.items():
-            for pattern in patterns:
-                match = re.search(pattern, text, re.IGNORECASE)
-                if match:
-                    return field_type, match.group(1)
-        
-        # Check for line item patterns
-        if re.search(r'\d+\s+\d+\.\d{2}', text) or re.search(r'\b\d{5,9}\b', text):
-            return 'line_item', text
-            
-        return 'unknown', text
-
-    def extract_table_structure(self, preprocessed_image, original_image):
-        """
-        Extract table structure from the invoice
-        
-        Args:
-            preprocessed_image: Preprocessed image
-            original_image: Original image
-            
-        Returns:
-            Detected table structure and line items
-        """
-        # Check if OpenCV and NumPy are available
-        if not CV2_AVAILABLE or not NUMPY_AVAILABLE:
-            logger.warning("OpenCV or NumPy not available. Cannot extract table structure.")
-            return [], []
-            
-        # Check if Tesseract is available for text extraction
-        if not TESSERACT_AVAILABLE:
-            logger.warning("Pytesseract not available. Cannot extract table text.")
-            return [], []
-            
-        # If we were given a file path instead of an image array (due to fallbacks earlier)
-        if isinstance(preprocessed_image, str) or isinstance(original_image, str):
-            logger.warning("Cannot extract table from file path. Extracting from whole image.")
-            if isinstance(original_image, str) and TESSERACT_AVAILABLE:
-                try:
-                    # Try to process the whole image with pytesseract
-                    full_text = pytesseract.image_to_string(original_image)
-                    lines = full_text.split('\n')
-                    line_items = []
-                    for line in lines:
-                        line = line.strip()
-                        if line and re.search(r'\d', line):
-                            line_items.append(line)
-                    return [], line_items
-                except Exception as e:
-                    logger.error(f"Failed to process image file with pytesseract: {e}")
-                    return [], []
-            return [], []
-            
-        try:
-            # Detect horizontal and vertical lines
-            horizontal = preprocessed_image.copy()
-            vertical = preprocessed_image.copy()
-            
-            # Specify size on horizontal axis
-            cols = horizontal.shape[1]
-            horizontal_size = cols // 30
-            
-            # Create structure element for extracting horizontal lines
-            horizontalStructure = cv2.getStructuringElement(cv2.MORPH_RECT, (horizontal_size, 1))
-            
-            # Apply morphology operations
-            horizontal = cv2.erode(horizontal, horizontalStructure)
-            horizontal = cv2.dilate(horizontal, horizontalStructure)
-            
-            # Specify size on vertical axis
-            rows = vertical.shape[0]
-            verticalsize = rows // 30
-            
-            # Create structure element for extracting vertical lines
-            verticalStructure = cv2.getStructuringElement(cv2.MORPH_RECT, (1, verticalsize))
-            
-            # Apply morphology operations
-            vertical = cv2.erode(vertical, verticalStructure)
-            vertical = cv2.dilate(vertical, verticalStructure)
-            
-            # Create a mask which includes the tables
-            mask = horizontal + vertical
-            
-            # Find contours in the mask
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            table_regions = []
-            for contour in contours:
-                x, y, w, h = cv2.boundingRect(contour)
-                if w > 100 and h > 50:  # Filter small regions
-                    table_regions.append((x, y, w, h))
-            
-            # Extract text from table regions
-            line_items = []
-            for region in table_regions:
-                x, y, w, h = region
-                try:
-                    table_roi = original_image[y:y+h, x:x+w]
-                    
-                    # Apply table-specific OCR with line segmentation
-                    table_text = pytesseract.image_to_string(
-                        table_roi, 
-                        config='--oem 3 --psm 6'
-                    )
-                    
-                    # Process table text into line items
-                    lines = table_text.split('\n')
-                    for line in lines:
-                        line = line.strip()
-                        if line and re.search(r'\d', line):  # Must contain at least one digit
-                            line_items.append(line)
-                except Exception as e:
-                    logger.error(f"Error extracting text from table region: {e}")
-            
-            return table_regions, line_items
-            
-        except Exception as e:
-            logger.error(f"Error in table structure extraction: {e}")
-            return [], []
-
     def process_invoice(self, image_path):
         """
-        Process an invoice image using AI-enhanced field recognition
+        Process an invoice image using AI-enhanced field recognition with extremely robust fallback
         
         Args:
             image_path: Path to the invoice image
@@ -509,135 +112,160 @@ class AIFieldRecognizer:
         Returns:
             Extracted invoice data and visualization info
         """
-        # First check if critical libraries are available
+        logger.info(f"Processing invoice: {image_path}")
+        
         if not os.path.exists(image_path):
             logger.error(f"Image file not found: {image_path}")
             return {
                 'fields': {'invoice_number': os.path.basename(image_path)},
-                'line_items': [{'product_code': 'ERROR', 'description': 'Image file not found', 'quantity': '0', 'unit_price': '0', 'total': '0'}],
-                'visualization': None,
-                'error': f"Image file not found: {image_path}"
+                'line_items': ["Error: Image file not found"],
+                'full_text': f"Error: Image file not found - {image_path}",
+                'visualization': self.create_simplified_visualization(None, {'error': 'File not found'})
             }
-            
+        
         try:
-            # Preprocess the image with enhanced error handling
-            try:
-                preprocessed, original = self.preprocess_image(image_path)
-            except Exception as e:
-                logger.error(f"Error in image preprocessing: {e}")
-                # Fall back to original image path if preprocessing fails
-                preprocessed = image_path
-                original = image_path
-                
-            # Get text regions with enhanced error handling
-            try:
-                text_regions = self.get_text_regions(preprocessed)
-            except Exception as e:
-                logger.error(f"Error in text region detection: {e}")
-                # Fall back to whole image if region detection fails
-                if isinstance(preprocessed, str):
-                    text_regions = [(0, 0, 800, 1000)]  # Default size
-                else:
-                    try:
-                        h, w = preprocessed.shape[:2]
-                        text_regions = [(0, 0, w, h)]
-                    except:
-                        text_regions = [(0, 0, 800, 1000)]
-            
-            # Extract field information with enhanced error handling
+            # Highly simplified and robust approach
+            # Extract text directly from the file without any preprocessing
+            full_text = ""
             fields = {}
-            all_text = ""
             
-            for region in text_regions:
-                try:
-                    text = self.enhance_ocr(original, region)
-                    all_text += text + "\n"
-                    field_type, value = self.identify_field_type(text)
-                    
-                    if field_type != 'unknown':
-                        fields[field_type] = value
-                except Exception as e:
-                    logger.error(f"Error in OCR for region {region}: {e}")
-                    # Continue with other regions
-                    continue
-            
-            # Extract table structure and line items with enhanced error handling
             try:
-                table_regions, line_items = self.extract_table_structure(preprocessed, original)
+                if TESSERACT_AVAILABLE:
+                    logger.info("Using pytesseract directly on the image")
+                    full_text = pytesseract.image_to_string(image_path)
+                else:
+                    logger.warning("Pytesseract not available. Using minimal processing.")
+                    full_text = f"OCR unavailable for {os.path.basename(image_path)}"
             except Exception as e:
-                logger.error(f"Error in table structure extraction: {e}")
-                table_regions = []
-                line_items = []
+                logger.error(f"Direct OCR failed: {e}")
+                full_text = f"OCR error: {str(e)[:100]}"
             
-            # If no line items detected through table structure, try extracting from all text
-            if not line_items:
-                try:
-                    text_line_items = self.extract_line_items_from_text(all_text)
-                    line_items.extend(text_line_items)
-                except Exception as e:
-                    logger.error(f"Error extracting line items from text: {e}")
-                    # Add a placeholder line item to avoid empty results
-                    line_items.append({
-                        'product_code': 'ERROR',
-                        'description': 'Error processing line items',
-                        'quantity': '0',
-                        'unit_price': '0',
-                        'total': '0'
-                    })
+            # Extract fields using regex patterns without relying on region detection
+            logger.info("Extracting fields from full text")
+            for field_type, patterns in self.field_patterns.items():
+                for pattern in patterns:
+                    match = re.search(pattern, full_text, re.IGNORECASE)
+                    if match:
+                        fields[field_type] = match.group(1)
+                        break
             
-            # Apply Edendale-specific rules based on image analysis
-            try:
-                if self.is_edendale_invoice(all_text):
-                    fields, line_items = self.apply_edendale_rules(fields, line_items, all_text)
-            except Exception as e:
-                logger.error(f"Error applying Edendale rules: {e}")
-                # Continue with existing fields and line items
+            # Extract line items from text without CV2
+            line_items = self.extract_line_items_from_text(full_text)
             
-            # Prepare visualization data with enhanced error handling
-            try:
-                visualization_data = self.prepare_visualization(original, text_regions, table_regions, fields)
-            except Exception as e:
-                logger.error(f"Error preparing visualization: {e}")
-                visualization_data = None
+            logger.info(f"Extracted {len(fields)} fields and {len(line_items)} line items")
             
-            # Ensure we have at least basic invoice data
-            if 'invoice_number' not in fields:
-                fields['invoice_number'] = os.path.basename(image_path)
-                
-            if not line_items:
-                line_items.append({
-                    'product_code': 'UNKNOWN',
-                    'description': 'No line items detected',
-                    'quantity': '0',
-                    'unit_price': '0',
-                    'total': '0'
-                })
+            # Apply Edendale-specific rules if detected
+            if "EDENDALE" in full_text.upper() or self.is_edendale_invoice(full_text):
+                logger.info("Detected Edendale invoice format, applying specific rules")
+                fields, line_items = self.apply_edendale_rules(fields, line_items, full_text)
             
-            # Prepare result
-            result = {
+            # Create a simplified visualization
+            visualization_data = self.create_simplified_visualization(image_path, fields)
+            
+            # Prepare the extraction result
+            extraction_result = {
                 'fields': fields,
                 'line_items': line_items,
+                'full_text': full_text,
                 'visualization': visualization_data
             }
             
-            return result
+            logger.info("Invoice processing complete with simplified approach")
+            return extraction_result
             
         except Exception as e:
-            logger.error(f"Error in invoice processing: {e}")
-            # Return basic structure even on error
-            filename = os.path.basename(image_path)
+            logger.error(f"Error in simplified invoice processing: {e}")
+            # Return minimal result with error message
             return {
-                'fields': {'invoice_number': filename},
-                'line_items': [{
-                    'product_code': 'ERROR',
-                    'description': f'Error processing invoice: {str(e)}',
-                    'quantity': '0',
-                    'unit_price': '0',
-                    'total': '0'
-                }],
-                'visualization': None,
-                'error': str(e)
+                'fields': {'invoice_number': 'ERROR', 'date': 'ERROR', 'total': 'ERROR'},
+                'line_items': [f"Error: {str(e)[:100]}"],
+                'full_text': f"Error processing invoice: {str(e)[:200]}",
+                'visualization': self.create_simplified_visualization(None, {'error': str(e)[:100]})
             }
+
+    def create_simplified_visualization(self, image_path, fields):
+        """
+        Create a simplified visualization of extraction results without complex image processing
+        
+        Args:
+            image_path: Path to the original image
+            fields: Extracted fields dictionary
+            
+        Returns:
+            Visualization data for UI display
+        """
+        logger.info("Creating simplified visualization without complex image processing")
+        
+        try:
+            # Try to encode the image as base64 for visualization
+            image_data = ""
+            if image_path and os.path.exists(image_path):
+                try:
+                    with open(image_path, 'rb') as f:
+                        image_bytes = f.read()
+                        image_data = base64.b64encode(image_bytes).decode('utf-8')
+                        logger.info("Successfully encoded image for visualization")
+                except Exception as e:
+                    logger.error(f"Error encoding image for visualization: {e}")
+            
+            # Create simple field visualization data
+            field_visualizations = []
+            y_position = 50  # Starting Y position for fields
+            
+            for field_name, field_value in fields.items():
+                field_visualizations.append({
+                    'label': field_name.replace('_', ' ').title(),
+                    'value': field_value,
+                    'bbox': [50, y_position, 300, 30]  # Simple placeholder coordinates
+                })
+                y_position += 40  # Increment Y position for next field
+            
+            visualization_data = {
+                'image': image_data,  # Use 'image' key to match existing visualization format
+                'fields': field_visualizations,
+                'tables': []  # No complex table detection in simplified version
+            }
+            
+            logger.info(f"Visualization created with {len(field_visualizations)} fields")
+            return visualization_data
+        
+        except Exception as e:
+            logger.error(f"Error in simplified visualization: {e}")
+            return {
+                'image': "",
+                'fields': [{'label': 'Error', 'value': str(e)[:100], 'bbox': [10, 10, 100, 20]}],
+                'tables': []
+            }
+
+    def extract_line_items_from_text(self, text):
+        """Extract line items from the full text when table detection fails"""
+        line_items = []
+        
+        # Extract simple "key: value" pairs in the text
+        pattern = r'(\w+[^:]*?):\s+(.+?)(?:\n|$)'
+        matches = re.findall(pattern, text)
+        
+        # Convert "key: value" pairs to line items
+        for key, value in matches:
+            if key.lower() not in ['invoice', 'date', 'total', 'subtotal']:
+                line_items.append(f"{key.strip()}: {value.strip()}")
+        
+        # Look for lines that might be line items (have numbers and product patterns)
+        lines = text.split('\n')
+        for line in lines:
+            # Process line if it has a mix of text and numbers but isn't already included
+            if (re.search(r'\d', line) and
+                re.search(r'[a-zA-Z]', line) and
+                len(line) > 10 and
+                line not in line_items and
+                not any(line.startswith(item) for item in line_items)):
+                
+                # Skip lines that are likely headers or footers
+                skip_patterns = ['invoice', 'total', 'date', 'bill to', 'ship to', 'page', 'payment']
+                if not any(pattern in line.lower() for pattern in skip_patterns):
+                    line_items.append(line.strip())
+        
+        return line_items
 
     def is_edendale_invoice(self, text):
         """Check if the invoice is in Edendale format"""
@@ -650,96 +278,38 @@ class AIFieldRecognizer:
         if invoice_match:
             fields['invoice_number'] = invoice_match.group(1)
         
-        # Enhanced product code extraction for Edendale
-        enhanced_line_items = []
-        for line in line_items:
-            # Look for product codes in specific formats
-            code_match = re.search(r'\b(\d{5,9})\b', line)
-            if code_match:
-                # Ensure this item isn't already processed
-                if not any(code_match.group(1) in item for item in enhanced_line_items):
-                    enhanced_line_items.append(line)
+        # Enhanced date extraction for Edendale
+        date_match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', text)
+        if date_match:
+            fields['date'] = date_match.group(1)
+            
+        # Process line items for Edendale format
+        edendale_items = []
+        product_code_pattern = r'\b(\d{5,9})\b'
+        amount_pattern = r'(\d+\.\d{2})'
         
-        # If we found enhanced line items, use them instead
-        if enhanced_line_items:
-            return fields, enhanced_line_items
-        
-        return fields, line_items
-
-    def extract_line_items_from_text(self, text):
-        """Extract line items from the full text when table detection fails"""
+        # Look for lines with product codes and amounts
         lines = text.split('\n')
-        line_items = []
+        for line in lines:
+            product_match = re.search(product_code_pattern, line)
+            amount_match = re.search(amount_pattern, line)
+            
+            if product_match and amount_match:
+                product_code = product_match.group(1)
+                amount = amount_match.group(1)
+                
+                # Extract description (text between product code and amount)
+                desc_match = re.search(f"{product_code}(.*?){amount}", line)
+                description = desc_match.group(1).strip() if desc_match else "Unknown product"
+                
+                edendale_items.append(f"{product_code} - {description} - {amount}")
         
-        for i, line in enumerate(lines):
-            line = line.strip()
-            # Look for patterns that indicate line items
-            if (re.search(r'\b\d{5,9}\b', line) and  # Product code
-                (re.search(r'\d+\.\d{2}', line) or   # Price
-                 (i + 1 < len(lines) and re.search(r'\d+\.\d{2}', lines[i+1])))):
-                line_items.append(line)
+        # If we found Edendale-specific line items, use them
+        if edendale_items:
+            return fields, edendale_items
         
-        return line_items
-
-    def prepare_visualization(self, original, text_regions, table_regions, fields):
-        """Prepare visualization data for interactive preview"""
-        # Check if OpenCV and NumPy are available for visualization
-        if not CV2_AVAILABLE or not NUMPY_AVAILABLE:
-            logger.warning("OpenCV or NumPy not available. Cannot prepare visualization.")
-            return None
-            
-        # If we have a file path instead of an image (due to fallbacks)
-        if isinstance(original, str):
-            logger.warning("Cannot create visualization from file path.")
-            return None
-            
-        try:
-            # Create a copy for visualization
-            vis_image = original.copy()
-            
-            # Draw text regions
-            for i, region in enumerate(text_regions):
-                x, y, w, h = region
-                # Draw rectangle around text region
-                cv2.rectangle(vis_image, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                
-                # Add field type label if available
-                field_type = None
-                for field, value in fields.items():
-                    # Check if region text contains field value
-                    region_text = self.enhance_ocr(original, region)
-                    if value in region_text:
-                        field_type = field
-                        break
-                
-                if field_type:
-                    cv2.putText(vis_image, field_type, (x, y-10), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-            
-            # Draw table regions
-            for region in table_regions:
-                x, y, w, h = region
-                cv2.rectangle(vis_image, (x, y), (x+w, y+h), (0, 0, 255), 2)
-                cv2.putText(vis_image, "Table", (x, y-10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-            
-            # Convert to base64 for web display
-            try:
-                _, buffer = cv2.imencode('.png', vis_image)
-                img_str = base64.b64encode(buffer).decode('utf-8')
-                
-                return {
-                    'image': img_str,
-                    'text_regions': text_regions,
-                    'table_regions': table_regions
-                }
-            except Exception as e:
-                logger.error(f"Error encoding image: {e}")
-                return None
-            
-        except Exception as e:
-            logger.error(f"Error in visualization preparation: {e}")
-            return None
+        # Otherwise return original data
+        return fields, line_items
 
     def generate_visualization(self, extraction_result):
         """Generate HTML for interactive visualization"""
