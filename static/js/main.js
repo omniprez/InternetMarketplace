@@ -296,14 +296,28 @@ function validateForm(form) {
         }
     });
     
-    // Check numeric fields
+    // Check numeric fields - with more flexible validation for OCR data
     const numericFields = form.querySelectorAll('[data-type="numeric"]');
     numericFields.forEach(field => {
-        if (field.value && isNaN(parseFloat(field.value))) {
-            field.classList.add('is-invalid');
-            isValid = false;
+        if (field.value) {
+            // Clean the value before validation (remove common OCR errors like spaces, letters)
+            let cleanedValue = field.value.replace(/[^\d.,]/g, '').replace(',', '.');
+            
+            // If there's still content but it's not a valid number
+            if (cleanedValue && isNaN(parseFloat(cleanedValue))) {
+                field.classList.add('is-invalid');
+                isValid = false;
+            } else if (cleanedValue) {
+                // If valid, update the field with the cleaned value
+                field.value = cleanedValue;
+            }
         }
     });
+    
+    // If not valid, show a user-friendly message
+    if (!isValid) {
+        showToast('Please check the highlighted fields for errors. You can manually edit them to fix OCR detection issues.', 'warning');
+    }
     
     return isValid;
 }

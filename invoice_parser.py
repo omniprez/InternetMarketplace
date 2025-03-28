@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def preprocess_image(image_path):
     """
-    Enhanced preprocessing to improve OCR accuracy
+    Enhanced preprocessing to improve OCR accuracy with multiple techniques
     """
     # Read the image
     img = cv2.imread(image_path)
@@ -47,51 +47,136 @@ def preprocess_image(image_path):
         rotated = cv2.warpAffine(gray, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
         gray = rotated
     
-    # Apply adaptive thresholding - better for varying lighting conditions
+    # Create multiple processed versions of the image for better OCR
+    preprocessed_images = []
+    
+    # Version 1: Basic adaptive thresholding (good for clean documents)
     binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    preprocessed_images.append(binary)
     
-    # Apply morphological operations more aggressively for table structure
-    # First remove small noise
-    kernel = np.ones((1, 1), np.uint8)
-    opening = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+    # Version 2: Stronger adaptive thresholding (good for low contrast)
+    binary_strong = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 3)
+    preprocessed_images.append(binary_strong)
     
-    # Then apply dilation to make text more pronounced
-    dilation_kernel = np.ones((2, 2), np.uint8)
-    dilation = cv2.dilate(opening, dilation_kernel, iterations=1)
+    # Version 3: Otsu's thresholding (good for bimodal images)
+    _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    preprocessed_images.append(otsu)
     
-    # Contrast stretching to enhance visibility
-    stretched = cv2.normalize(dilation, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    # Version 4: Noise reduction and edge enhancement
+    # First denoise
+    denoised = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
+    # Then threshold
+    _, denoise_thresh = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    preprocessed_images.append(denoise_thresh)
     
-    return stretched
+    # Version 5: Special table structure processing for line items
+    # Apply erosion followed by dilation to enhance table structures
+    kernel = np.ones((2, 2), np.uint8)
+    eroded = cv2.erode(binary, kernel, iterations=1)
+    dilated = cv2.dilate(eroded, kernel, iterations=2)
+    preprocessed_images.append(dilated)
+    
+    # Apply contrast stretching to all versions
+    enhanced_images = []
+    for img in preprocessed_images:
+        # Normalize to enhance contrast
+        enhanced = cv2.normalize(img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+        enhanced_images.append(enhanced)
+    
+    # Return the most processed version for line item extraction and number recognition
+    # This is the version with table structure enhancement
+    return enhanced_images[4]
 
 def extract_text(preprocessed_image):
     """
-    Enhanced text extraction using Tesseract with optimized configuration
+    Enhanced text extraction using Tesseract with multiple configurations
+    and intelligent text combination for better accuracy
     """
     try:
-        # Use multiple PSM modes to improve text extraction
-        # PSM 4 - Assume a single column of text of variable sizes
-        # PSM 6 - Assume a single uniform block of text
-        # PSM 11 - Sparse text. Find as much text as possible in no particular order
-        # PSM 12 - Sparse text with OSD
+        # Try multiple OCR approaches and configurations for better results
+        ocr_results = []
         
-        # Configure Tesseract for optimal invoice recognition
-        custom_config = r'--oem 3 --psm 6 -l eng --dpi 300'
-        text_psm6 = pytesseract.image_to_string(preprocessed_image, config=custom_config)
+        # Configuration 1: Standard with layout analysis (good for structured documents)
+        config_standard = r'--oem 3 --psm 6 -l eng --dpi 300'
+        text_standard = pytesseract.image_to_string(preprocessed_image, config=config_standard)
+        ocr_results.append(text_standard)
         
-        custom_config = r'--oem 3 --psm 11 -l eng --dpi 300'
-        text_psm11 = pytesseract.image_to_string(preprocessed_image, config=custom_config)
+        # Configuration 2: Single column variable height (better for mixed content)
+        config_single_column = r'--oem 3 --psm 4 -l eng --dpi 300'
+        text_single_column = pytesseract.image_to_string(preprocessed_image, config=config_single_column)
+        ocr_results.append(text_single_column)
         
-        # Combine results, with preference to PSM 6 for structured text
-        combined_text = text_psm6
+        # Configuration 3: Sparse text (find text anywhere, good for tables and headers)
+        config_sparse = r'--oem 3 --psm 11 -l eng --dpi 300'
+        text_sparse = pytesseract.image_to_string(preprocessed_image, config=config_sparse)
+        ocr_results.append(text_sparse)
         
-        # If PSM11 contains numbers or important patterns that PSM6 might miss, add them
-        invoice_patterns = ['invoice', 'total', 'vat', 'quantity', 'product']
-        for pattern in invoice_patterns:
-            if pattern in text_psm11.lower() and pattern not in combined_text.lower():
-                combined_text += "\n" + text_psm11
-                break
-                
+        # Configuration 4: Special for numbers (better for detecting prices and quantities)
+        config_digits = r'--oem 3 --psm 7 -l eng --dpi 300 -c tessedit_char_whitelist="0123456789.,ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "'
+        text_digits = pytesseract.image_to_string(preprocessed_image, config=config_digits)
+        ocr_results.append(text_digits)
+        
+        # Combine results intelligently (more sophisticated than just concatenation)
+        # Start with the standard text as our base
+        combined_text = text_standard
+        
+        # Define key patterns to look for in invoices
+        key_patterns = {
+            'invoice_number': [r'invoice\s*(?:#|number|no[.:]?)\s*([A-Za-z0-9-]+)', 
+                              r'IN(\d+)EDL(\d+)'],
+            'date': [r'date\s*:\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})', 
+                    r'date\s*:\s*(\d{1,2}\s+[A-Za-z]+\s+\d{2,4})'],
+            'customer': [r'customer\s*(?:name|ref)[.:]?\s*(.+?)(?=\n|address)', 
+                        r'customer[.:]?\s*([A-Za-z0-9\s&\-,.]+)'],
+            'vat': [r'vat\s*(?:reg|registration)\s*(?:no|number)[.:]?\s*([A-Za-z0-9]+)',
+                   r'vat\s*@\s*\d+%\s*(\d+(?:,\d+)*(?:\.\d+)?)'],
+            'product_codes': [r'(?:\d{8}\s+\d+\.\d+)', r'(?:[A-Z0-9]{6,}\s+\d+\.\d+)'],
+            'totals': [r'total\s*\((?:rs|inr)\)\s*(\d+(?:,\d+)*(?:\.\d+)?)', 
+                      r'grand\s*total\s*(\d+(?:,\d+)*(?:\.\d+)?)']
+        }
+        
+        # For each pattern, look in all OCR results and enhance the combined text
+        for pattern_type, patterns in key_patterns.items():
+            pattern_found = False
+            
+            # Check if the pattern already exists in the combined text
+            for pattern in patterns:
+                if re.search(pattern, combined_text, re.IGNORECASE):
+                    pattern_found = True
+                    break
+            
+            # If not found, look in other OCR results
+            if not pattern_found:
+                for result in ocr_results:
+                    for pattern in patterns:
+                        if re.search(pattern, result, re.IGNORECASE):
+                            # Extract the relevant section and add it to combined text
+                            match = re.search(pattern, result, re.IGNORECASE)
+                            if match:
+                                # Extract context around the match (2 lines before and after)
+                                lines = result.split('\n')
+                                for i, line in enumerate(lines):
+                                    if pattern in line.lower() or pattern_type in line.lower():
+                                        start_idx = max(0, i - 2)
+                                        end_idx = min(len(lines), i + 3)
+                                        context = '\n'.join(lines[start_idx:end_idx])
+                                        if context not in combined_text:
+                                            combined_text += '\n' + context
+                                        pattern_found = True
+                                        break
+                    if pattern_found:
+                        break
+        
+        # Final clean-up: remove duplicate lines and excess whitespace
+        lines = combined_text.split('\n')
+        unique_lines = []
+        for line in lines:
+            clean_line = line.strip()
+            if clean_line and clean_line not in unique_lines:
+                unique_lines.append(clean_line)
+        
+        combined_text = '\n'.join(unique_lines)
+        
         return combined_text
     except Exception as e:
         logger.error(f"Error in OCR text extraction: {str(e)}")
@@ -459,36 +544,122 @@ def apply_specific_rules(invoice_data, text):
     Apply specific rules for known invoice formats
     """
     # Check if it's a Edendale Distributors invoice
-    if 'Edendale Distributors' in text:
+    if 'Edendale' in text or 'EDENDALE' in text:
+        logger.info("Applying specialized Edendale invoice processing")
         # Special processing for Edendale invoices
         # Based on the sample invoice in the image
         
         # Extract invoice number format IN1234EDL5678
-        invoice_match = re.search(r'IN(\d+)EDL(\d+)', text)
-        if invoice_match:
-            invoice_data['header']['invoice_number'] = f"IN{invoice_match.group(1)}EDL{invoice_match.group(2)}"
+        invoice_number_patterns = [
+            r'IN(\d+)EDL(\d+)',
+            r'Customer Code:\s*(\w+)',
+            r'Invoice No:\s*(\w+)'
+        ]
         
-        # Extract line items - using known product code formats
-        product_code_lines = re.findall(r'(5\d{7}|8\d{7}|9\d{7})\s+(\d+(?:\.\d+)?)\s+([A-Za-z0-9\s&]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)', text)
+        for pattern in invoice_number_patterns:
+            invoice_match = re.search(pattern, text)
+            if invoice_match:
+                if 'IN' in pattern:
+                    invoice_data['header']['invoice_number'] = f"IN{invoice_match.group(1)}EDL{invoice_match.group(2)}"
+                else:
+                    invoice_data['header']['invoice_number'] = invoice_match.group(1).strip()
+                break
         
-        if product_code_lines:
-            invoice_data['line_items'] = []
-            for line in product_code_lines:
-                item = {
-                    'product_code': line[0].strip(),
-                    'quantity': line[1].strip(),
-                    'description': line[2].strip(),
-                    'unit_price': line[3].strip(),
-                    'discount': line[4].strip(),
-                    'total': line[5].strip()
-                }
-                invoice_data['line_items'].append(item)
+        # Extract VAT and Business registration numbers with more specific patterns
+        vat_reg_patterns = [
+            r'VAT Reg No\.?:?\s*([A-Za-z0-9]+)',
+            r'VAT Reg No\.?:?\s*(\d+)'
+        ]
+        
+        for pattern in vat_reg_patterns:
+            vat_match = re.search(pattern, text)
+            if vat_match:
+                invoice_data['header']['vat_reg_no'] = vat_match.group(1).strip()
+                break
+        
+        # Extract business registration number
+        business_reg_patterns = [
+            r'Business Reg No\.?:?\s*([A-Za-z0-9]+)',
+            r'Business Reg No\.?:?\s*(\d+)'
+        ]
+        
+        for pattern in business_reg_patterns:
+            business_match = re.search(pattern, text)
+            if business_match:
+                invoice_data['header']['business_reg_no'] = business_match.group(1).strip()
+                break
+        
+        # Extract line items - using known product code formats for Edendale invoices
+        # Multiple patterns for different possible OCR interpretations
+        product_code_patterns = [
+            # Pattern for correct recognition
+            r'(5\d{7}|8\d{7}|9\d{7})\s+(\d+(?:\.\d+)?)\s+([A-Za-z0-9\s&\-.,]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:,\d+)*(?:\.\d+)?)',
+            # Pattern for when OCR might merge numbers
+            r'(5\d{7}|8\d{7}|9\d{7})\s+(\d+)\s+([A-Za-z0-9\s&\-.,]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+)',
+            # Pattern for possible OCR errors in product codes
+            r'(5\d{5,7}|8\d{5,7}|9\d{5,7})\s+(\d+(?:\.\d+)?)\s+([A-Za-z0-9\s&\-.,]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:,\d+)*(?:\.\d+)?)'
+        ]
+        
+        edendale_items = []
+        
+        for pattern in product_code_patterns:
+            product_code_lines = re.findall(pattern, text)
+            if product_code_lines:
+                for line in product_code_lines:
+                    item = {
+                        'product_code': line[0].strip(),
+                        'quantity': line[1].strip(),
+                        'description': line[2].strip(),
+                        'unit_price': line[3].strip(),
+                        'discount': line[4].strip(),
+                        'total': line[5].strip().replace(',', '')
+                    }
+                    edendale_items.append(item)
+        
+        # If we found items using the specialized patterns, use them instead
+        if edendale_items:
+            logger.info(f"Found {len(edendale_items)} line items using Edendale-specific patterns")
+            invoice_data['line_items'] = edendale_items
                 
-        # Check for special VAT format
-        if not invoice_data['totals']['vat']:
-            vat_match = re.search(r'VAT\s*@\s*(\d+(?:,\d+)*(?:\.\d+)?)', text)
+        # Enhanced extraction for totals in Edendale format
+        # Extract Total
+        total_patterns = [
+            r'Total \(Rs\)\s*(\d+(?:,\d+)*(?:\.\d+)?)',
+            r'Total\s*\(Rs\)\s*(\d+(?:,\d+)*(?:\.\d+)?)',
+            r'Total\s*(\d+(?:,\d+)*(?:\.\d+)?)'
+        ]
+        
+        for pattern in total_patterns:
+            total_match = re.search(pattern, text)
+            if total_match:
+                invoice_data['totals']['subtotal'] = total_match.group(1).replace(',', '')
+                break
+        
+        # Extract VAT
+        vat_patterns = [
+            r'VAT\s*@\s*\d+%\s*(\d+(?:,\d+)*(?:\.\d+)?)',
+            r'VAT\s*@\s*(\d+(?:,\d+)*(?:\.\d+)?)',
+            r'VAT\s*(\d+(?:,\d+)*(?:\.\d+)?)'
+        ]
+        
+        for pattern in vat_patterns:
+            vat_match = re.search(pattern, text)
             if vat_match:
                 invoice_data['totals']['vat'] = vat_match.group(1).replace(',', '')
+                break
+        
+        # Extract Grand Total
+        grand_total_patterns = [
+            r'GRAND TOTAL\s*(\d+(?:,\d+)*(?:\.\d+)?)',
+            r'Grand Total\s*(\d+(?:,\d+)*(?:\.\d+)?)',
+            r'GRAND\s*TOTAL\s*(\d+(?:,\d+)*(?:\.\d+)?)'
+        ]
+        
+        for pattern in grand_total_patterns:
+            grand_total_match = re.search(pattern, text)
+            if grand_total_match:
+                invoice_data['totals']['grand_total'] = grand_total_match.group(1).replace(',', '')
+                break
 
     return invoice_data
 
@@ -514,9 +685,26 @@ def process_image(image_path):
         
         # First try to detect the invoice type for better specialized extraction
         invoice_type = 'unknown'
-        if 'Edendale Distributors' in text:
-            invoice_type = 'edendale'
-            logger.info("Detected Edendale Distributors invoice format")
+        # Check for Edendale invoice with multiple patterns
+        edendale_patterns = [
+            'Edendale Distributors',
+            'Edendale',
+            'EDENDALE',
+            # Product code patterns specific to Edendale
+            r'5\d{7}|8\d{7}|9\d{7}',
+            # Check for their format of VAT registration
+            'VAT Reg No.: VAT20362266',
+            # Check for typical text in their invoices
+            'CREDIT SALES',
+            # Check for receipt statement
+            'Credit Sales not settled within 1 month from invoice date will bear interest at 2%'
+        ]
+        
+        for pattern in edendale_patterns:
+            if pattern in text or re.search(pattern, text):
+                invoice_type = 'edendale'
+                logger.info(f"Detected Edendale Distributors invoice format using pattern: {pattern[:20]}")
+                break
         # Add more invoice type detections as needed
         
         # Parse different sections of the invoice

@@ -179,20 +179,35 @@ def update_data():
     item_count = int(request.form.get('item_count', 0))
     
     for i in range(item_count):
+        # Sanitize numeric values to handle OCR errors
+        quantity = request.form.get(f'item_{i}_quantity', '')
+        unit_price = request.form.get(f'item_{i}_unit_price', '')
+        discount = request.form.get(f'item_{i}_discount', '')
+        total = request.form.get(f'item_{i}_total', '')
+        
+        # Clean numeric values
+        try:
+            quantity = clean_numeric_value(quantity)
+            unit_price = clean_numeric_value(unit_price)
+            discount = clean_numeric_value(discount)
+            total = clean_numeric_value(total)
+        except Exception as e:
+            logger.warning(f"Error cleaning numeric values: {str(e)}")
+        
         item = {
             'product_code': request.form.get(f'item_{i}_product_code', ''),
-            'quantity': request.form.get(f'item_{i}_quantity', ''),
+            'quantity': quantity,
             'description': request.form.get(f'item_{i}_description', ''),
-            'unit_price': request.form.get(f'item_{i}_unit_price', ''),
-            'discount': request.form.get(f'item_{i}_discount', ''),
-            'total': request.form.get(f'item_{i}_total', '')
+            'unit_price': unit_price,
+            'discount': discount,
+            'total': total
         }
         line_items.append(item)
     
     # Update totals
     totals = {}
     for key in ['subtotal', 'vat', 'grand_total']:
-        totals[key] = request.form.get(f'totals_{key}', '')
+        totals[key] = clean_numeric_value(request.form.get(f'totals_{key}', ''))
     
     # Preserve the invoice type if it exists in the original data
     invoice_type = invoice_data.get('invoice_type', 'unknown')
@@ -204,19 +219,47 @@ def update_data():
     invoice_data['invoice_type'] = invoice_type  # Keep the invoice type
     session['invoice_data'] = invoice_data
     
-    # Generate Excel file
-    file_path = session.get('file_path')
-    if file_path:
-        base_name = os.path.splitext(os.path.basename(file_path))[0]
-        excel_file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{base_name}.xlsx")
-        create_excel_file(invoice_data, excel_file_path)
-        session['excel_file_path'] = excel_file_path
-        
-        flash('Data updated successfully and Excel file generated!', 'success')
-    else:
-        flash('Data updated but could not generate Excel file.', 'warning')
+    try:
+        # Generate Excel file
+        file_path = session.get('file_path')
+        if file_path:
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            excel_file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{base_name}.xlsx")
+            create_excel_file(invoice_data, excel_file_path)
+            session['excel_file_path'] = excel_file_path
+            
+            flash('Data updated successfully and Excel file generated!', 'success')
+        else:
+            flash('Data updated but could not generate Excel file.', 'warning')
+    except Exception as e:
+        logger.error(f"Error generating Excel file: {str(e)}")
+        flash(f'Error generating Excel file: {str(e)}. Please check the data for any invalid values.', 'danger')
     
     return redirect(url_for('review_data'))
+
+# Helper function to clean numeric values from OCR
+def clean_numeric_value(value):
+    """Clean numeric values that might contain OCR errors"""
+    if not value:
+        return '0'
+        
+    # Remove any non-numeric characters except decimal point and comma
+    value = ''.join(c for c in value if c.isdigit() or c in '.,')
+    
+    # Replace comma with dot for decimal
+    value = value.replace(',', '.')
+    
+    # If empty after cleaning, return zero
+    if not value:
+        return '0'
+        
+    try:
+        # Try to convert to float to validate
+        float_val = float(value)
+        return str(float_val)
+    except:
+        # If conversion fails, return as is
+        return value
 
 @app.route('/download_excel')
 def download_excel():
