@@ -1,15 +1,105 @@
-import cv2
-import numpy as np
-import pytesseract
 import re
 import logging
 from PIL import Image
 import os
 import math
+import sys
+import signal
+import time
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+# Import OpenCV with fallback
+CV2_AVAILABLE = False
+try:
+    import cv2
+    CV2_AVAILABLE = True
+    logger.info("OpenCV is available for invoice processing")
+except ImportError:
+    logger.warning("OpenCV (cv2) not available. Using basic image processing.")
+except Exception as e:
+    logger.error(f"Error importing OpenCV: {str(e)}")
+
+# Import NumPy with fallback
+NUMPY_AVAILABLE = False
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+    logger.info("NumPy is available for invoice processing")
+except ImportError:
+    logger.warning("NumPy not available. Using basic numerical operations.")
+except Exception as e:
+    logger.error(f"Error importing NumPy: {str(e)}")
+
+# Import pytesseract with fallback
+TESSERACT_AVAILABLE = False
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+    logger.info("Pytesseract is available for OCR")
+except ImportError:
+    logger.warning("Pytesseract not available. OCR functionality will be limited.")
+except Exception as e:
+    logger.error(f"Error importing Pytesseract: {str(e)}")
+    
+# Create fallback function for when critical libraries are missing
+def create_fallback_invoice_data(image_path):
+    """Create basic invoice data structure when libraries are unavailable"""
+    logger.warning(f"Using fallback processing for {image_path}")
+    
+    # Try to extract basic information using PIL if available
+    filename = os.path.basename(image_path)
+    file_without_extension, _ = os.path.splitext(filename)
+    
+    # Create basic invoice structure with filename as invoice number
+    invoice_data = {
+        'header': {
+            'invoice_number': file_without_extension[:15],
+            'date': '',
+            'customer_name': '',
+            'customer_ref': '',
+            'vat_reg_no': '',
+            'business_reg_no': ''
+        },
+        'line_items': [],
+        'totals': {
+            'subtotal': '0',
+            'vat': '0',
+            'grand_total': '0'
+        },
+        'invoice_type': 'unknown',
+        'processing_note': 'Limited processing due to missing libraries'
+    }
+    
+    # Try to use PIL to at least extract image dimensions
+    try:
+        from PIL import Image
+        with Image.open(image_path) as img:
+            width, height = img.size
+            logger.info(f"Image dimensions: {width}x{height}")
+            # Add a single placeholder line item
+            invoice_data['line_items'].append({
+                'product_code': 'FALLBACK',
+                'description': f'Image processed with limited capabilities ({width}x{height})',
+                'quantity': '1',
+                'unit_price': '0',
+                'discount': '0',
+                'total': '0'
+            })
+    except Exception as e:
+        logger.error(f"Basic image processing failed: {str(e)}")
+        invoice_data['line_items'].append({
+            'product_code': 'FALLBACK',
+            'description': 'Image could not be processed',
+            'quantity': '1',
+            'unit_price': '0',
+            'discount': '0',
+            'total': '0'
+        })
+    
+    return invoice_data
 
 def preprocess_image(image_path):
     """
@@ -719,6 +809,12 @@ def process_image(image_path):
     """
     logger.info(f"Starting processing of image: {image_path}")
     
+    # Check if required libraries are available
+    if not CV2_AVAILABLE or not NUMPY_AVAILABLE or not TESSERACT_AVAILABLE:
+        logger.warning("Critical libraries unavailable. Using basic fallback processing.")
+        # Return basic fallback structure with empty fields
+        return create_fallback_invoice_data(image_path)
+        
     # Initialize with empty/default values
     default_invoice_data = {
         'header': {

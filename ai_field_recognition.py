@@ -542,39 +542,109 @@ class AIFieldRecognizer:
         Returns:
             Extracted invoice data and visualization info
         """
+        # First check if critical libraries are available
+        if not os.path.exists(image_path):
+            logger.error(f"Image file not found: {image_path}")
+            return {
+                'fields': {'invoice_number': os.path.basename(image_path)},
+                'line_items': [{'product_code': 'ERROR', 'description': 'Image file not found', 'quantity': '0', 'unit_price': '0', 'total': '0'}],
+                'visualization': None,
+                'error': f"Image file not found: {image_path}"
+            }
+            
         try:
-            # Preprocess the image
-            preprocessed, original = self.preprocess_image(image_path)
+            # Preprocess the image with enhanced error handling
+            try:
+                preprocessed, original = self.preprocess_image(image_path)
+            except Exception as e:
+                logger.error(f"Error in image preprocessing: {e}")
+                # Fall back to original image path if preprocessing fails
+                preprocessed = image_path
+                original = image_path
+                
+            # Get text regions with enhanced error handling
+            try:
+                text_regions = self.get_text_regions(preprocessed)
+            except Exception as e:
+                logger.error(f"Error in text region detection: {e}")
+                # Fall back to whole image if region detection fails
+                if isinstance(preprocessed, str):
+                    text_regions = [(0, 0, 800, 1000)]  # Default size
+                else:
+                    try:
+                        h, w = preprocessed.shape[:2]
+                        text_regions = [(0, 0, w, h)]
+                    except:
+                        text_regions = [(0, 0, 800, 1000)]
             
-            # Get text regions
-            text_regions = self.get_text_regions(preprocessed)
-            
-            # Extract field information
+            # Extract field information with enhanced error handling
             fields = {}
             all_text = ""
             
             for region in text_regions:
-                text = self.enhance_ocr(original, region)
-                all_text += text + "\n"
-                field_type, value = self.identify_field_type(text)
-                
-                if field_type != 'unknown':
-                    fields[field_type] = value
+                try:
+                    text = self.enhance_ocr(original, region)
+                    all_text += text + "\n"
+                    field_type, value = self.identify_field_type(text)
+                    
+                    if field_type != 'unknown':
+                        fields[field_type] = value
+                except Exception as e:
+                    logger.error(f"Error in OCR for region {region}: {e}")
+                    # Continue with other regions
+                    continue
             
-            # Extract table structure and line items
-            table_regions, line_items = self.extract_table_structure(preprocessed, original)
+            # Extract table structure and line items with enhanced error handling
+            try:
+                table_regions, line_items = self.extract_table_structure(preprocessed, original)
+            except Exception as e:
+                logger.error(f"Error in table structure extraction: {e}")
+                table_regions = []
+                line_items = []
             
             # If no line items detected through table structure, try extracting from all text
             if not line_items:
-                text_line_items = self.extract_line_items_from_text(all_text)
-                line_items.extend(text_line_items)
+                try:
+                    text_line_items = self.extract_line_items_from_text(all_text)
+                    line_items.extend(text_line_items)
+                except Exception as e:
+                    logger.error(f"Error extracting line items from text: {e}")
+                    # Add a placeholder line item to avoid empty results
+                    line_items.append({
+                        'product_code': 'ERROR',
+                        'description': 'Error processing line items',
+                        'quantity': '0',
+                        'unit_price': '0',
+                        'total': '0'
+                    })
             
             # Apply Edendale-specific rules based on image analysis
-            if self.is_edendale_invoice(all_text):
-                fields, line_items = self.apply_edendale_rules(fields, line_items, all_text)
+            try:
+                if self.is_edendale_invoice(all_text):
+                    fields, line_items = self.apply_edendale_rules(fields, line_items, all_text)
+            except Exception as e:
+                logger.error(f"Error applying Edendale rules: {e}")
+                # Continue with existing fields and line items
             
-            # Prepare visualization data
-            visualization_data = self.prepare_visualization(original, text_regions, table_regions, fields)
+            # Prepare visualization data with enhanced error handling
+            try:
+                visualization_data = self.prepare_visualization(original, text_regions, table_regions, fields)
+            except Exception as e:
+                logger.error(f"Error preparing visualization: {e}")
+                visualization_data = None
+            
+            # Ensure we have at least basic invoice data
+            if 'invoice_number' not in fields:
+                fields['invoice_number'] = os.path.basename(image_path)
+                
+            if not line_items:
+                line_items.append({
+                    'product_code': 'UNKNOWN',
+                    'description': 'No line items detected',
+                    'quantity': '0',
+                    'unit_price': '0',
+                    'total': '0'
+                })
             
             # Prepare result
             result = {
@@ -588,9 +658,16 @@ class AIFieldRecognizer:
         except Exception as e:
             logger.error(f"Error in invoice processing: {e}")
             # Return basic structure even on error
+            filename = os.path.basename(image_path)
             return {
-                'fields': {},
-                'line_items': [],
+                'fields': {'invoice_number': filename},
+                'line_items': [{
+                    'product_code': 'ERROR',
+                    'description': f'Error processing invoice: {str(e)}',
+                    'quantity': '0',
+                    'unit_price': '0',
+                    'total': '0'
+                }],
                 'visualization': None,
                 'error': str(e)
             }
@@ -700,17 +777,61 @@ class AIFieldRecognizer:
     def generate_visualization(self, extraction_result):
         """Generate HTML for interactive visualization"""
         try:
+            # Validate input first
+            if not extraction_result or not isinstance(extraction_result, dict):
+                return """
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> Invalid extraction result format.
+                </div>
+                <div>
+                    <p>The extraction result could not be processed correctly. Please try again.</p>
+                </div>
+                """
+                
             # Extract the data even if visualization is not available
             fields = extraction_result.get('fields', {})
-            line_items = extraction_result.get('line_items', [])
             
-            # Check if visualization data is available
-            has_visualization = ('visualization' in extraction_result and 
-                                extraction_result['visualization'] is not None and
-                                'image' in extraction_result['visualization'])
+            # Handle line_items properly based on type
+            line_items_raw = extraction_result.get('line_items', [])
+            line_items = []
+            
+            # Process line items into a consistent format
+            for item in line_items_raw:
+                if isinstance(item, dict):
+                    # Format dictionary items properly
+                    try:
+                        item_str = f"{item.get('product_code', 'N/A')} - {item.get('description', 'No description')} - Qty: {item.get('quantity', '0')} - Unit: {item.get('unit_price', '0')} - Total: {item.get('total', '0')}"
+                        line_items.append(item_str)
+                    except Exception as format_error:
+                        logger.error(f"Error formatting line item dict: {format_error}")
+                        line_items.append(str(item))
+                elif isinstance(item, str):
+                    # String items can be used directly
+                    line_items.append(item)
+                else:
+                    # Convert other types to string
+                    try:
+                        line_items.append(str(item))
+                    except Exception as e:
+                        logger.error(f"Failed to convert line item to string: {e}")
+                        line_items.append("Error: Could not display this item")
+            
+            # Check if visualization data is available with safe access
+            has_visualization = False
+            try:
+                vis_data = extraction_result.get('visualization', None)
+                has_visualization = (vis_data is not None and 
+                                    isinstance(vis_data, dict) and
+                                    'image' in vis_data and 
+                                    vis_data['image'])
+            except Exception as vis_error:
+                logger.error(f"Error checking visualization data: {vis_error}")
+                has_visualization = False
                                 
-            # Create HTML for the data display
-            html = """
+            # Create HTML for the data display with safe HTML generation
+            col_class = "col-md-6" if has_visualization else "col-md-12"
+            
+            html = f"""
             <div class="extraction-preview">
                 <div class="row">
                     <div class="{col_class}">
@@ -723,17 +844,31 @@ class AIFieldRecognizer:
                                 </tr>
                             </thead>
                             <tbody>
-            """.format(col_class="col-md-6" if has_visualization else "col-md-12")
+            """
             
-            # Add fields
-            if fields:
+            # Add fields with safer HTML generation
+            if fields and isinstance(fields, dict):
                 for field, value in fields.items():
-                    html += f"""
-                    <tr>
-                        <td>{field}</td>
-                        <td>{value}</td>
-                    </tr>
-                    """
+                    try:
+                        field_name = str(field)
+                        field_value = str(value)
+                        # Basic HTML escaping
+                        field_name = field_name.replace('<', '&lt;').replace('>', '&gt;')
+                        field_value = field_value.replace('<', '&lt;').replace('>', '&gt;')
+                        
+                        html += f"""
+                        <tr>
+                            <td>{field_name}</td>
+                            <td>{field_value}</td>
+                        </tr>
+                        """
+                    except Exception as e:
+                        logger.error(f"Error rendering field: {e}")
+                        html += """
+                        <tr>
+                            <td colspan="2" class="text-center text-danger">Error displaying this field</td>
+                        </tr>
+                        """
             else:
                 html += """
                 <tr>
@@ -756,15 +891,26 @@ class AIFieldRecognizer:
                             <tbody>
             """
             
-            # Add line items
+            # Add line items with safer HTML generation
             if line_items:
                 for i, item in enumerate(line_items):
-                    html += f"""
-                    <tr>
-                        <td>{i+1}</td>
-                        <td>{item}</td>
-                    </tr>
-                    """
+                    try:
+                        # Basic HTML escaping
+                        safe_item = str(item).replace('<', '&lt;').replace('>', '&gt;')
+                        html += f"""
+                        <tr>
+                            <td>{i+1}</td>
+                            <td>{safe_item}</td>
+                        </tr>
+                        """
+                    except Exception as e:
+                        logger.error(f"Error rendering line item: {e}")
+                        html += """
+                        <tr>
+                            <td>-</td>
+                            <td class="text-danger">Error displaying this item</td>
+                        </tr>
+                        """
             else:
                 html += """
                 <tr>
@@ -778,17 +924,36 @@ class AIFieldRecognizer:
                     </div>
             """
             
-            # Add visualization section if available
+            # Add visualization section if available - with robust error handling
             if has_visualization:
-                vis_data = extraction_result['visualization']
-                html += """
-                    <div class="col-md-6">
-                        <h4>Visual Extraction</h4>
-                        <div class="visual-preview text-center">
-                            <img src="data:image/png;base64,{}" class="img-fluid extraction-image">
+                try:
+                    vis_data = extraction_result['visualization']
+                    image_data = vis_data.get('image', '')
+                    
+                    # Validate the image data is a string that can be displayed
+                    if isinstance(image_data, str) and image_data:
+                        html += f"""
+                            <div class="col-md-6">
+                                <h4>Visual Extraction</h4>
+                                <div class="visual-preview text-center">
+                                    <img src="data:image/png;base64,{image_data}" class="img-fluid extraction-image">
+                                </div>
+                            </div>
+                        """
+                    else:
+                        raise ValueError("Invalid image data format")
+                except Exception as vis_error:
+                    logger.error(f"Error rendering visualization: {vis_error}")
+                    html += """
+                        <div class="col-md-6">
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle"></i> Error displaying visual extraction.
+                            </div>
+                            <div class="text-center text-muted">
+                                <p>The visual preview could not be generated due to an error in image processing.</p>
+                            </div>
                         </div>
-                    </div>
-                """.format(vis_data['image'])
+                    """
             else:
                 # Add a note when visualization is not available
                 html += """
@@ -809,13 +974,16 @@ class AIFieldRecognizer:
             
         except Exception as e:
             logger.error(f"Error generating visualization: {e}")
-            # Return a simpler fallback HTML
+            # Return a simpler fallback HTML with clear error message
             return f"""
-            <div class="alert alert-danger">
-                <i class="fas fa-exclamation-triangle"></i> Error generating visualization: {str(e)}
-            </div>
-            <div>
-                <p>Extraction was completed but there was an error displaying the results.</p>
-                <p>The data has been processed and is available for download.</p>
+            <div class="card border-danger mb-3">
+                <div class="card-header bg-danger text-white">
+                    <i class="fas fa-exclamation-triangle"></i> Visualization Error
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">Error generating visualization</h5>
+                    <p class="card-text">An error occurred while preparing the visualization: {str(e)}</p>
+                    <p>The extraction process may have completed successfully despite this error. You can try downloading the results or processing the invoice again.</p>
+                </div>
             </div>
             """
