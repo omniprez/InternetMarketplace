@@ -1,144 +1,219 @@
-/* Custom styles for Invoice OCR Application */
+/* Main styles for the Invoice OCR application */
 
-.container {
-    max-width: 1200px;
-}
-
+/* Custom styles for drag and drop */
 .upload-area {
-    border: 2px dashed var(--bs-gray-500);
-    border-radius: 8px;
-    padding: 40px;
+    border: 2px dashed var(--bs-border-color);
+    border-radius: 0.5rem;
+    padding: 2rem;
     text-align: center;
     transition: all 0.3s ease;
-    cursor: pointer;
-    margin-bottom: 20px;
+    background-color: rgba(33, 37, 41, 0.2);
+    position: relative;
 }
 
-.upload-area:hover {
+.upload-area.highlight {
     border-color: var(--bs-primary);
+    background-color: rgba(13, 110, 253, 0.05);
 }
 
-.upload-area.drag-over {
-    background-color: rgba(var(--bs-primary-rgb), 0.1);
-    border-color: var(--bs-primary);
-}
-
-.upload-icon {
+.upload-area .fa-upload {
     font-size: 3rem;
-    margin-bottom: 15px;
-    color: var(--bs-gray-500);
+    margin-bottom: 1rem;
+    color: var(--bs-secondary);
 }
 
-.upload-area:hover .upload-icon {
-    color: var(--bs-primary);
+.upload-area p {
+    margin-bottom: 1rem;
 }
 
-.upload-text {
-    margin-bottom: 15px;
-}
-
-.invoice-preview {
-    max-height: 400px;
-    overflow-y: auto;
-    border: 1px solid var(--bs-gray-300);
-    border-radius: 4px;
-    padding: 15px;
-    margin-bottom: 20px;
-}
-
-.validation-badge {
-    margin-left: 10px;
+.upload-area input[type="file"] {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    opacity: 0;
     cursor: pointer;
 }
 
-.navbar-brand {
-    font-weight: bold;
+/* Preview image styles */
+.preview-container {
+    margin-top: 1.5rem;
+    text-align: center;
 }
 
-.footer {
-    margin-top: 40px;
-    padding: 20px 0;
-    border-top: 1px solid var(--bs-gray-300);
+.preview-image {
+    max-width: 100%;
+    max-height: 400px;
+    border-radius: 0.5rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
 }
 
-.line-item-row {
-    margin-bottom: 15px;
-    padding-bottom: 15px;
-    border-bottom: 1px solid var(--bs-gray-200);
+/* Progress bar */
+.progress {
+    display: none;
+    margin-top: 1rem;
 }
 
-.line-item-row:last-child {
+/* Results section */
+.results-container {
+    margin-top: 2rem;
+}
+
+.result-card {
+    margin-bottom: 1.5rem;
+    border: none;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+.result-card .card-header {
+    background-color: rgba(33, 37, 41, 0.03);
+    font-weight: 600;
+}
+
+/* Toast notifications */
+.toast-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 1050;
+}
+
+/* Additional styles for batch upload */
+.batch-files-container {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.file-item {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--bs-border-color);
+}
+
+.file-item:last-child {
     border-bottom: none;
 }
 
-.batch-upload-results {
-    margin-top: 30px;
+.file-item .icon {
+    margin-right: 0.5rem;
 }
 
-.batch-summary {
-    background-color: rgba(var(--bs-info-rgb), 0.1);
-    border-radius: 8px;
-    padding: 20px;
-    margin-bottom: 20px;
+.file-item .file-name {
+    flex-grow: 1;
 }
 
-.feature-icon {
-    font-size: 2rem;
-    color: var(--bs-primary);
-    margin-bottom: 15px;
+.file-item .remove-btn {
+    color: var(--bs-danger);
+    cursor: pointer;
 }
 
-.feature-card {
-    height: 100%;
-    transition: all 0.3s ease;
+/* Extraction preview specific styles */
+.extraction-preview {
+    margin-top: 2rem;
 }
 
-.feature-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+.visual-preview {
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    background-color: rgba(33, 37, 41, 0.03);
 }
 
-.results-section {
-    margin-top: 30px;
+.extraction-image {
+    max-width: 100%;
+    border-radius: 0.25rem;
 }
 
-.table-responsive {
-    overflow-x: auto;
+/* Field highlighting */
+.highlight-field {
+    border: 2px solid var(--bs-primary);
+    background-color: rgba(13, 110, 253, 0.1);
+    padding: 0.25rem;
+    border-radius: 0.25rem;
+    transition: all 0.2s ease;
 }
 
-.table th {
-    background-color: var(--bs-gray-300);
+.highlight-field:hover {
+    border-color: var(--bs-info);
+    background-color: rgba(13, 202, 240, 0.1);
 }
 
-/* Loading spinner */
-.loading-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
+/* Interactive editable fields */
+.editable-field {
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 0.25rem;
+    border: 1px dashed transparent;
+    transition: all 0.2s ease;
+}
+
+.editable-field:hover {
+    border-color: var(--bs-primary);
+    background-color: rgba(13, 110, 253, 0.05);
+}
+
+.editable-field.editing {
+    border-color: var(--bs-primary);
+    background-color: rgba(13, 110, 253, 0.1);
+}
+
+/* Accuracy indicators */
+.accuracy-indicator {
+    display: inline-block;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+}
+
+.accuracy-high {
+    background-color: var(--bs-success);
+}
+
+.accuracy-medium {
+    background-color: var(--bs-warning);
+}
+
+.accuracy-low {
+    background-color: var(--bs-danger);
+}
+
+/* Settings panel */
+.settings-panel {
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    background-color: rgba(33, 37, 41, 0.03);
+}
+
+.settings-toggle {
+    cursor: pointer;
+}
+
+.settings-content {
+    margin-top: 1rem;
+}
+
+/* Stats display */
+.stats-container {
+    padding: 1rem;
+    margin-top: 1rem;
+    border-radius: 0.5rem;
+    background-color: rgba(33, 37, 41, 0.03);
+}
+
+.stat-item {
     display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 9999;
-    display: none;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--bs-border-color);
 }
 
-.spinner-container {
-    background-color: white;
-    padding: 20px;
-    border-radius: 8px;
-    text-align: center;
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-    .upload-area {
-        padding: 20px;
-    }
-    
-    .feature-card {
-        margin-bottom: 20px;
-    }
+.stat-item:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
 }

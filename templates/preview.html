@@ -1,0 +1,215 @@
+{% extends 'base.html' %}
+
+{% block title %}Extraction Preview{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Interactive Extraction Preview</h1>
+        <div>
+            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary me-2">
+                <i class="fas fa-arrow-left"></i> Back
+            </a>
+            <form action="{{ url_for('accept_extraction') }}" method="post" class="d-inline">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-check"></i> Accept & Continue
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card bg-light border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="d-flex align-items-center">
+                                <div class="display-4 me-3 text-primary">{{ stats.confidence }}%</div>
+                                <div>
+                                    <h5 class="mb-0">Confidence</h5>
+                                    <p class="text-muted small mb-0">Extraction quality</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="d-flex align-items-center">
+                                <div class="display-4 me-3 text-success">{{ stats.fields_detected }}</div>
+                                <div>
+                                    <h5 class="mb-0">Fields</h5>
+                                    <p class="text-muted small mb-0">Headers detected</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="d-flex align-items-center">
+                                <div class="display-4 me-3 text-info">{{ stats.line_items }}</div>
+                                <div>
+                                    <h5 class="mb-0">Items</h5>
+                                    <p class="text-muted small mb-0">Line items extracted</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="d-flex align-items-center">
+                                <div class="display-4 me-3 text-warning">{{ stats.processing_time }}s</div>
+                                <div>
+                                    <h5 class="mb-0">Speed</h5>
+                                    <p class="text-muted small mb-0">Processing time</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card mb-4 border-0 shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0"><i class="fas fa-eye me-2"></i>Interactive Extraction Preview</h3>
+                </div>
+                <div class="card-body">
+                    <!-- The extraction preview is injected here directly from Python -->
+                    {{ extraction_preview|safe }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-info text-white">
+                    <h3 class="mb-0"><i class="fas fa-file-invoice me-2"></i>Extracted Header</h3>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table">
+                            <tbody>
+                                {% if header %}
+                                    {% for key, value in header.items() %}
+                                    <tr>
+                                        <th>{{ key|replace('_', ' ')|title }}</th>
+                                        <td>{{ value }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="2" class="text-center">No header information detected</td>
+                                    </tr>
+                                {% endif %}
+                                {% if totals %}
+                                    <tr class="table-active">
+                                        <th colspan="2">Totals</th>
+                                    </tr>
+                                    {% for key, value in totals.items() %}
+                                    <tr>
+                                        <th>{{ key|replace('_', ' ')|title }}</th>
+                                        <td>{{ value }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-success text-white">
+                    <h3 class="mb-0"><i class="fas fa-list-ul me-2"></i>Extracted Line Items</h3>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Line Item</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if line_items %}
+                                    {% for item in line_items %}
+                                    <tr>
+                                        <td>{{ loop.index }}</td>
+                                        <td>
+                                            {% if item is string %}
+                                                {{ item }}
+                                            {% else %}
+                                                {% for key, value in item.items() %}
+                                                    <strong>{{ key }}</strong>: {{ value }}<br>
+                                                {% endfor %}
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="2" class="text-center">No line items detected</td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <form action="{{ url_for('accept_extraction') }}" method="post">
+            <button type="submit" class="btn btn-lg btn-primary">
+                <i class="fas fa-check-circle me-2"></i> Accept Extraction & Continue to Edit
+            </button>
+            <a href="{{ url_for('reset') }}" class="btn btn-lg btn-outline-danger ms-2">
+                <i class="fas fa-trash me-2"></i> Discard & Start Over
+            </a>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $(document).ready(function() {
+        // Add zoom functionality to the extraction image
+        $('.extraction-image').on('click', function() {
+            $(this).toggleClass('zoomed');
+        });
+    });
+</script>
+
+<style>
+    .extraction-image {
+        cursor: zoom-in;
+        transition: transform 0.3s ease;
+        max-height: 600px;
+    }
+    
+    .extraction-image.zoomed {
+        transform: scale(1.5);
+        cursor: zoom-out;
+        transform-origin: top left;
+    }
+    
+    .visual-preview {
+        overflow: auto;
+        max-height: 600px;
+    }
+    
+    .card {
+        transition: all 0.2s ease-in-out;
+    }
+    
+    .card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.1) !important;
+    }
+</style>
+{% endblock %}

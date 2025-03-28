@@ -1,5 +1,12 @@
 {pkgs}: {
   deps = [
+    pkgs.qhull
+    pkgs.pkg-config
+    pkgs.gtk3
+    pkgs.gobject-introspection
+    pkgs.ghostscript
+    pkgs.ffmpeg-full
+    pkgs.cairo
     pkgs.hdf5
     pkgs.tesseract
     pkgs.libGLU

@@ -1,18 +1,82 @@
 import os
 import logging
 import uuid
-from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file
-import pandas as pd
-from werkzeug.utils import secure_filename
+import time
+import json
+import sys
 import tempfile
 import shutil
 
-from invoice_parser import process_image
-from excel_generator import create_excel_file
-
-# Setup logging
+# Setup logging first
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+# Import Flask and related dependencies with error handling
+try:
+    from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify
+    logger.info("Successfully imported Flask")
+except ImportError as e:
+    logger.error(f"Failed to import Flask: {e}")
+    sys.exit(1)
+
+try:
+    import pandas as pd
+    logger.info("Successfully imported pandas")
+except ImportError as e:
+    logger.error(f"Failed to import pandas: {e}")
+    sys.exit(1)
+
+try:
+    from werkzeug.utils import secure_filename
+    logger.info("Successfully imported werkzeug")
+except ImportError as e:
+    logger.error(f"Failed to import werkzeug: {e}")
+    sys.exit(1)
+
+# Import our application modules with error handling
+try:
+    from invoice_parser import process_image
+    logger.info("Successfully imported invoice_parser")
+except ImportError as e:
+    logger.error(f"Failed to import invoice_parser: {e}")
+    sys.exit(1)
+
+try:
+    from excel_generator import create_excel_file
+    logger.info("Successfully imported excel_generator")
+except ImportError as e:
+    logger.error(f"Failed to import excel_generator: {e}")
+    sys.exit(1)
+
+# Try to import the AI field recognizer with graceful fallback
+field_recognizer = None
+try:
+    from ai_field_recognition import AIFieldRecognizer
+    field_recognizer = AIFieldRecognizer()
+    logger.info("Successfully initialized AI field recognizer")
+except Exception as e:
+    logger.error(f"Failed to initialize AI field recognizer: {e}")
+    logger.warning("Continuing without AI field recognition capabilities")
+    
+    # Create minimal fallback for the field_recognizer
+    class FallbackFieldRecognizer:
+        def process_invoice(self, image_path):
+            logger.warning(f"Using fallback processor for {image_path}")
+            # Delegate to the standard invoice processor
+            from invoice_parser import process_image
+            result = process_image(image_path)
+            # Convert to AI field recognizer format
+            return {
+                'fields': {k: v for k, v in result.get('header', {}).items()},
+                'line_items': result.get('line_items', []),
+                'visualization_data': None
+            }
+            
+        def generate_visualization(self, extraction_result):
+            return "<p>AI visualization not available - using fallback processor</p>"
+    
+    # Set the fallback recognizer
+    field_recognizer = FallbackFieldRecognizer()
 
 # Initialize Flask application
 app = Flask(__name__)
@@ -20,9 +84,14 @@ app.secret_key = os.environ.get("SESSION_SECRET", "invoice-ocr-secret-key")
 
 # Configure upload folder
 UPLOAD_FOLDER = tempfile.mkdtemp()
+if not os.path.exists(os.path.join(UPLOAD_FOLDER, 'uploads')):
+    os.makedirs(os.path.join(UPLOAD_FOLDER, 'uploads'))
+
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'tiff'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+
+# Field recognizer is already initialized above
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -53,19 +122,105 @@ def upload_file():
     if file and allowed_file(file.filename):
         # Create a unique filename
         filename = str(uuid.uuid4()) + '_' + secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        
+        # Save to uploads folder for web access
+        upload_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'uploads')
+        if not os.path.exists(upload_dir):
+            os.makedirs(upload_dir)
+            
+        filepath = os.path.join(upload_dir, filename)
         file.save(filepath)
         
+        # Save a copy for processing
+        process_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        shutil.copy2(filepath, process_filepath)
+        
         try:
-            # Process the invoice image
-            logger.info(f"Processing file: {filepath}")
-            invoice_data = process_image(filepath)
+            # Configure extraction settings based on user options
+            ai_enhanced = request.form.get('ai_enhanced', 'true') == 'true'
+            enhancement_level = request.form.get('enhancement_level', 'medium')
+            recognition_mode = request.form.get('recognition_mode', 'auto')
             
-            # Store invoice data in session for review
+            # Store settings in session
+            session['extraction_settings'] = {
+                'ai_enhanced': ai_enhanced,
+                'enhancement_level': enhancement_level,
+                'recognition_mode': recognition_mode
+            }
+            
+            # Measure processing time
+            start_time = time.time()
+            
+            if ai_enhanced and field_recognizer is not None:
+                try:
+                    # Use AI-enhanced field recognition
+                    logger.info(f"Processing file with AI enhancement: {process_filepath}")
+                    extraction_result = field_recognizer.process_invoice(process_filepath)
+                    
+                    # Convert AI result format to the expected invoice_data format
+                    invoice_data = {
+                        'header': {},
+                        'line_items': extraction_result.get('line_items', []),
+                        'totals': {},
+                        'invoice_type': 'unknown'
+                    }
+                    
+                    # Map AI-extracted fields to invoice header format
+                    fields = extraction_result.get('fields', {})
+                    for field, value in fields.items():
+                        if field == 'invoice_number':
+                            invoice_data['header']['invoice_number'] = value
+                        elif field == 'date':
+                            invoice_data['header']['date'] = value
+                        elif field == 'total':
+                            invoice_data['totals']['grand_total'] = value
+                    
+                    # Add the visualization HTML
+                    extraction_preview = field_recognizer.generate_visualization(extraction_result)
+                except Exception as e:
+                    logger.error(f"Error in AI enhancement, falling back to traditional OCR: {e}")
+                    # Fall back to traditional OCR
+                    invoice_data = process_image(process_filepath)
+                    extraction_preview = "<p>AI-enhanced visualization failed: falling back to traditional OCR</p>"
+            else:
+                # Use traditional OCR processing
+                ai_reason = "disabled by user" if not ai_enhanced else "not available"
+                logger.info(f"Processing file with traditional OCR ({ai_reason}): {process_filepath}")
+                invoice_data = process_image(process_filepath)
+                extraction_preview = f"<p>AI-enhanced visualization {ai_reason}</p>"
+            
+            # Calculate processing time and confidence
+            processing_time = round(time.time() - start_time, 2)
+            
+            # Calculate confidence based on the amount of data extracted
+            fields_detected = len(invoice_data.get('header', {}))
+            line_items_count = len(invoice_data.get('line_items', []))
+            
+            # Simple confidence calculation based on data extracted
+            if fields_detected > 4 and line_items_count > 5:
+                confidence = 85
+            elif fields_detected > 2 and line_items_count > 2:
+                confidence = 65
+            else:
+                confidence = 40
+            
+            # Store stats for the preview page
+            stats = {
+                'fields_detected': fields_detected,
+                'line_items': line_items_count,
+                'confidence': confidence,
+                'processing_time': processing_time
+            }
+            
+            # Store data in session for further processing
             session['invoice_data'] = invoice_data
-            session['file_path'] = filepath
+            session['file_path'] = process_filepath
+            session['filename'] = filename
+            session['extraction_preview'] = extraction_preview
+            session['stats'] = stats
             
-            return redirect(url_for('review_data'))
+            # Redirect to preview or review page based on setting
+            return redirect(url_for('preview_extraction'))
         except Exception as e:
             logger.error(f"Error processing invoice: {str(e)}")
             flash(f'Error processing invoice: {str(e)}', 'danger')
@@ -288,6 +443,46 @@ def download_batch_excel():
                     as_attachment=True,
                     download_name='combined_invoices.xlsx')
 
+@app.route('/preview')
+def preview_extraction():
+    """
+    Preview the extraction results with interactive visualization
+    """
+    # Get data from session
+    invoice_data = session.get('invoice_data')
+    extraction_preview = session.get('extraction_preview')
+    filename = session.get('filename')
+    stats = session.get('stats')
+    
+    if not invoice_data or not extraction_preview:
+        flash('No extraction data to preview. Please upload an invoice first.', 'warning')
+        return redirect(url_for('index'))
+    
+    # Prepare data for template
+    header_data = invoice_data.get('header', {})
+    line_items = invoice_data.get('line_items', [])
+    totals = invoice_data.get('totals', {})
+    
+    # Get original image path for display
+    uploaded_image_path = None
+    if filename:
+        uploaded_image_path = url_for('static', filename=f'uploads/{filename}')
+    
+    return render_template('preview.html',
+                         header=header_data,
+                         line_items=line_items,
+                         totals=totals,
+                         extraction_preview=extraction_preview,
+                         uploaded_image=uploaded_image_path,
+                         stats=stats)
+
+@app.route('/accept_extraction', methods=['POST'])
+def accept_extraction():
+    """
+    Accept the extraction results and proceed to review
+    """
+    return redirect(url_for('review_data'))
+
 @app.route('/reset')
 def reset():
     # Clear session data
@@ -295,6 +490,10 @@ def reset():
     session.pop('file_path', None)
     session.pop('excel_file_path', None)
     session.pop('batch_invoice_data', None)
+    session.pop('extraction_preview', None)
+    session.pop('filename', None)
+    session.pop('stats', None)
+    session.pop('extraction_settings', None)
     
     flash('Data has been reset. You can upload a new invoice.', 'info')
     return redirect(url_for('index'))

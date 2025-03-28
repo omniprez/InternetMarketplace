@@ -13,6 +13,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Form submission with loading animation
     setupFormSubmission();
+    
+    // Setup AI enhancement options
+    setupAIEnhancement();
 });
 
 /**
@@ -320,6 +323,61 @@ function validateForm(form) {
     }
     
     return isValid;
+}
+
+/**
+ * Set up AI enhancement options
+ */
+function setupAIEnhancement() {
+    const aiSwitch = document.getElementById('ai-enhanced-switch');
+    const aiOptions = document.getElementById('ai-options');
+    
+    if (!aiSwitch || !aiOptions) return;
+    
+    // Handle toggle of AI enhancement
+    aiSwitch.addEventListener('change', function() {
+        // Set value based on switch state
+        this.value = this.checked ? 'true' : 'false';
+        
+        // Show/hide options and show feedback
+        if (this.checked) {
+            aiOptions.style.opacity = '1';
+            aiOptions.style.pointerEvents = 'auto';
+            showToast('AI-enhanced extraction enabled. This will provide more accurate results and interactive visualization!', 'success');
+        } else {
+            aiOptions.style.opacity = '0.5';
+            aiOptions.style.pointerEvents = 'none';
+            showToast('AI-enhanced extraction disabled. Using standard OCR only.', 'info');
+        }
+    });
+    
+    // Enhancement level change
+    const enhancementLevel = document.getElementById('enhancement-level');
+    if (enhancementLevel) {
+        enhancementLevel.addEventListener('change', function() {
+            const levels = {
+                'light': 'Faster processing with good accuracy',
+                'medium': 'Balanced performance and accuracy',
+                'deep': 'Highest accuracy but slower processing'
+            };
+            
+            showToast(`Enhancement level set to ${this.value}: ${levels[this.value]}`, 'info');
+        });
+    }
+    
+    // Recognition mode change
+    const recognitionMode = document.getElementById('recognition-mode');
+    if (recognitionMode) {
+        recognitionMode.addEventListener('change', function() {
+            if (this.value === 'edendale') {
+                showToast('Using Edendale-specific invoice format recognition patterns', 'info');
+            } else if (this.value === 'general') {
+                showToast('Using general invoice format recognition', 'info');
+            } else {
+                showToast('Auto-detecting invoice format', 'info');
+            }
+        });
+    }
 }
 
 /**
